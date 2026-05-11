@@ -50,3 +50,53 @@ The companion `experiments/<exp_id>/` directory holds the actual GIFs, stats.jso
 - Pull more val too: with only 1 val trajectory all 6 default demo samples are from the same scene.
 
 ---
+
+## exp02 — 38 trajectories from 5 shards, stopped at step 22,800
+
+**Tag:** `poc-v2`
+**Date:** 2026-05-11
+
+### Setup
+Same as exp01 (NanoWM-S/2, 256², 8-frame clips at frame_interval=2, bs=1 × grad_accum=4, bf16, LR 1e-4) — the only thing that changed is the data.
+
+### Data
+- **5 shards** (one date each):
+  - `20210828_heightmaps_1` (9 trajs)
+  - `20210903_heightmaps_7` (9)
+  - `20210829_heightmaps_3` (9)
+  - `20210829_heightmaps_2` (9)
+  - `20210902_heightmaps_2` (9)
+- 1 truncated bag per shard skipped → **45 usable trajectories**
+- Split: 38 train / 7 val (hash-based, val_fraction=0.1)
+- Total: **9,340 train frames + 1,597 val frames = ~11k frames** (~18 min driving)
+- Action ranges: throttle `[0.000, 0.992]` mean 0.312; steer `[-1.000, 1.000]` mean -0.006 (closer to symmetric than exp01's biased 0.090)
+
+### Training
+- Configured 30k steps; **manually stopped at step ~22,800** (laptop time constraint, val was clearly past its best)
+- Wall-clock: ~1h 40min
+- Step rate: ~3.7 steps/s (slightly faster than exp01's 3.4)
+- train_loss: 0.441 → 0.289 (best 0.049 at a noisy minimum)
+- **val_loss best: 0.3164 at step 15,262** (vs exp01's 0.3884 — **18.5% better**)
+- val_loss trajectory: 0.376 → 0.350 (step 2.1k) → 0.317 (step 15.3k, best) → 0.330 (step 22.6k)
+- No NaN/Inf
+
+### Evaluation
+- **Hypothesis confirmed: more diverse data fixes the early-overfit pattern.** exp01's best val was at step 2,499; exp02's best was at step 15,262 — pushed ~6× later, matching the 5× data scale.
+- Past step 15k, val_loss started drifting up the same way exp01 did past step 2.5k. So the **useful ceiling for this dataset size is around 15k steps**.
+- To push further, need more data, not more steps.
+
+### Artifacts
+- Checkpoint (final): `~/results/nanowm/20260511_162258-NanoWM-S-2-F8S2-tartandrive/checkpoints/latest/latest-epoch=2199-step=22000.ckpt` (812 MB)
+- Checkpoint (best-val region): `~/results/nanowm/20260511_162258-NanoWM-S-2-F8S2-tartandrive/checkpoints/across_timesteps/epoch=1999-step=20000.ckpt` (closest snapshot to step 15k best)
+- TensorBoard: `~/results/nanowm/20260511_162258-NanoWM-S-2-F8S2-tartandrive/tb/`
+- `experiments/exp02_38trajs_step22k/stats.json` — action distribution
+- Demo GIFs: deferred (laptop time constraint) — re-run with `scripts/rollout_demo.py` pointing at the step-22000 checkpoint when convenient.
+
+### What we learned (informs the next iteration)
+- 5× more data → 18.5% lower val_loss + ~6× longer training before overfit. Linear-ish scaling, so dataset size remains the bottleneck.
+- To get a meaningfully better model, the next iteration should:
+  1. **Pull all 23 shards** (~280k frames, ~25× current) — needs ~17 hr of downloads. Now that we know the pipeline works end-to-end, this is just a longer download.
+  2. **Move training to a cloud A100** — at our 3.7 steps/s, 100k steps on full data would take ~7.5 hr. On an A100 with bs=8, maybe ~1.5 hr (~$2 at Lambda/RunPod).
+- Other deferred enhancements (best-by-val checkpoint policy, h-flip augmentation, fixing the metrics callback for cached latents) are smaller-impact and can wait.
+
+---
