@@ -1,0 +1,22 @@
+{
+  "n_train_trajectories": 8,
+  "n_val_trajectories": 1,
+  "n_train_frames": 1990,
+  "action_dim": 2,
+  "action_min": [
+    0.0,
+    -1.0
+  ],
+  "action_max": [
+    0.9129742383956909,
+    1.0
+  ],
+  "action_mean": [
+    0.25109368562698364,
+    0.08962070941925049
+  ],
+  "action_std": [
+    0.16807341575622559,
+    0.6137353777885437
+  ]
+}

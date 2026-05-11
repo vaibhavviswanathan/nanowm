@@ -68,19 +68,61 @@ index ea20c4e..01265c4 100644
          )
  
 diff --git a/src/sample/rollout.py b/src/sample/rollout.py
-index 2c91bd6..90faee7 100644
+index 2c91bd6..ac02e9e 100644
 --- a/src/sample/rollout.py
 +++ b/src/sample/rollout.py
-@@ -149,13 +149,15 @@ def main(args):
+@@ -102,17 +102,41 @@ def main(args):
+     if dataset.slice_mode != "exhaustive":
+         raise ValueError(f"Rollout requires exhaustive slice_mode, got '{dataset.slice_mode}'")
+ 
++    # Spread samples across distinct trajectories: take the FIRST valid slice
++    # of each trajectory (start_frame=0 is always valid if the traj is long
++    # enough). Falls back to "any valid slice" if we run out of trajectories.
++    seen_trajs = set()
+     valid_slice_indices = []
++    # First pass: one valid slice per distinct trajectory.
+     for i in range(len(dataset)):
+         slice_idx = dataset.slice_indices[i]
+         slice_info = dataset.all_slices[slice_idx]
+         traj_idx = slice_info.traj_idx
++        if traj_idx in seen_trajs:
++            continue
+         start_frame = slice_info.start_frame
+         total_len = dataset.data_source.get_seq_length(traj_idx)
+         if (total_len - start_frame) >= rollout_length * frame_interval:
+             valid_slice_indices.append(i)
++            seen_trajs.add(traj_idx)
+         if len(valid_slice_indices) >= args.num_samples:
+             break
++    # Second pass: if we still need more samples than trajectories, pick more
++    # slices from the trajectories we've already used.
++    if len(valid_slice_indices) < args.num_samples:
++        already = set(valid_slice_indices)
++        for i in range(len(dataset)):
++            if i in already:
++                continue
++            slice_idx = dataset.slice_indices[i]
++            slice_info = dataset.all_slices[slice_idx]
++            traj_idx = slice_info.traj_idx
++            start_frame = slice_info.start_frame
++            total_len = dataset.data_source.get_seq_length(traj_idx)
++            if (total_len - start_frame) >= rollout_length * frame_interval:
++                valid_slice_indices.append(i)
++            if len(valid_slice_indices) >= args.num_samples:
++                break
+             
+     num_samples = len(valid_slice_indices)
+     if num_samples < args.num_samples:
+@@ -149,13 +173,15 @@ def main(args):
                  start=start_frame,
                  end=end_frame,
                  step=frame_interval
 -            )  # [T, C, H, W] in [0, 1]
-+            )  # [T, C, H, W] in [0, 1]  OR  [T, C_lat, H', W'] if cached latents
- 
+-
 -            # Resize to match training resolution
 -            visual_frames = resize_frames(visual_frames, dataset.image_size, dataset.resize_mode)
--
++            )  # [T, C, H, W] in [0, 1]  OR  [T, C_lat, H', W'] if cached latents
+ 
 -            # Normalize pixels to [-1, 1]
 -            visual_frames = visual_frames * 2.0 - 1.0
 +            # Resize + normalize only for actual pixel video. Cached latents
