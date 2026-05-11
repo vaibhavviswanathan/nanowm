@@ -1,43 +1,27 @@
-# Registering TartanDriveDataSource in the factory
+# Upstream factory patch — superseded by `patches/01-upstream-integration.patch`
 
-The repo's data source factory (`src/wm_datasets/data_source/factory.py`)
-dispatches on dataset name. You need to add a branch for `tartandrive`.
+This file used to speculate about the upstream factory dispatch pattern. As of
+Phase 0 we've read the real upstream code (pinned at the SHA in `UPSTREAM_PIN`)
+and committed a single patch file that captures all required upstream edits.
 
-## What it probably looks like
+To apply: run `bash scripts/apply_upstream_patches.sh` after cloning upstream.
 
-Open `src/wm_datasets/data_source/factory.py`. You'll see something like:
+The patch:
+- Lazy-imports `lerobot` so the `diffusers==0.24.0` pin holds without installing it.
+- Adds a `tartandrive` branch to `create_data_source` that forwards
+  `latents_path` and `use_cached_latents` to `TartanDriveDataSource`.
+- Extends `world_model_dataset.datasource_params` (two sites) with
+  `latents_path`/`use_cached_latents` so Hydra-side YAML kwargs reach the
+  DataSource.
 
-```python
-def build_data_source(name: str, **kwargs):
-    if name == "csgo":
-        from src.wm_datasets.data_source.game.csgo import CSGODataSource
-        return CSGODataSource(**kwargs)
-    elif name.startswith("dino_wm"):
-        from src.wm_datasets.data_source.dino_wm import DinoWMDataSource
-        return DinoWMDataSource(name=name, **kwargs)
-    elif name == "rt1":
-        ...
-    else:
-        raise ValueError(f"Unknown dataset: {name}")
-```
+The script also symlinks our tracked scaffold dirs into the upstream tree:
 
-## What to add
+- `nano-world-model/src/wm_datasets/data_source/offroad` ->
+  `src/wm_datasets/data_source/offroad`
+- `nano-world-model/src/configs/dataset/offroad` ->
+  `src/configs/dataset/offroad`
 
-Add a branch for `tartandrive`:
+That way edits land in tracked files and propagate to the runtime tree on save.
 
-```python
-elif name == "tartandrive":
-    from src.wm_datasets.data_source.offroad.tartandrive import TartanDriveDataSource
-    return TartanDriveDataSource(**kwargs)
-```
-
-The exact dispatch syntax (if/elif chain, dict lookup, registry decorator,
-etc.) depends on what's already there. Match the existing pattern.
-
-## Verifying it worked
-
-After registering, run the smoke test (`scripts/smoke_test.sh`). If it errors
-with `Unknown dataset: tartandrive`, the registration didn't take. If it
-errors somewhere inside `TartanDriveDataSource.__init__`, the registration
-worked but the DataSource has a bug — most commonly a wrong path in the
-config or a base-class signature mismatch.
+See `docs/phase0_findings.md` for the full API reading that motivated this
+patch.

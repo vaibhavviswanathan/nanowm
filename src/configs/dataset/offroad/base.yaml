@@ -1,17 +1,30 @@
-# Base config for offroad datasets. Mirrors the structure of dino_wm/base.yaml
-# from nano-world-model — adjust if your repo's base contract differs.
+# Base for offroad datasets. Mirrors dino_wm/base.yaml's shape so that
+# create_train_val_datasets receives the same set of loader kwargs.
+# @package dataset
 
-defaults:
-  - _self_
+loader:
+  # Filled in by per-dataset configs:
+  data_path_train: null
+  data_path_val: null
+  # Optional cached-latent path. The TartanDrive DataSource splits this by
+  # appending the same basename as data_path_{train,val}; see tartandrive.yaml.
+  latents_path: null
+  use_cached_latents: false
 
-# Validation sampling: exhaustive at fixed start indices for reproducibility.
-validation_size: 32
-val_slice_mode: exhaustive
+  n_rollout: null
+  split_ratio: 0.9
+  validation_size: 32
+  validation_fixed_subset_path: null
+  validation_fixed_subset_size: null
+  validation_fixed_subset_seed: 42
 
-# Training sampling: random — TartanDrive trajectories are long enough that
-# enumerating all windows is wasteful.
-train_slice_mode: random
+  normalize_state: false
+  # TartanDrive actions are nominally in [-1, 1]; verify with stats.json
+  # after preprocessing and flip this if your stats are out of range.
+  normalize_action: false
 
-# Action normalization. TartanDrive throttle/steer are nominally [-1, 1]; turn
-# this on if your stats.json shows otherwise.
-normalize_action: false
+  train_slice_mode: "random"
+  val_slice_mode: "exhaustive"
+  stride: 1
+  random_seed: 42
+  resize_mode: "stretch"

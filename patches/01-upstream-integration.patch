@@ -38,7 +38,7 @@ index 8c23960..8c58408 100644
      "create_data_source",
  ]
 diff --git a/src/wm_datasets/data_source/factory.py b/src/wm_datasets/data_source/factory.py
-index eeb4f52..5dce678 100644
+index eeb4f52..4ffb4ab 100644
 --- a/src/wm_datasets/data_source/factory.py
 +++ b/src/wm_datasets/data_source/factory.py
 @@ -5,7 +5,6 @@ Factory helpers for DataSource creation.
@@ -63,3 +63,47 @@ index eeb4f52..5dce678 100644
          lerobot_params = {'root', 'image_key', 'preload_trajectories', 'episodes'}
          lerobot_kwargs = {k: v for k, v in kwargs.items() if k in lerobot_params}
          return LeRobotDataSource(
+@@ -72,7 +72,22 @@ def create_data_source(
+             **csgo_kwargs
+         )
+ 
++    if dataset_name == "tartandrive":
++        # Lazy import: avoids loading offroad code (and its torch/numpy paths)
++        # when other datasets are used.
++        from .offroad.tartandrive import TartanDriveDataSource  # noqa: PLC0415
++
++        tartandrive_kwargs = {
++            k: v for k, v in kwargs.items()
++            if k in ['latents_path', 'use_cached_latents']
++        }
++        return TartanDriveDataSource(
++            data_path=data_path,
++            n_rollout=n_rollout,
++            **tartandrive_kwargs,
++        )
++
+     raise ValueError(
+         f"Unknown dataset: {dataset_name}. "
+-        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo"
++        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo, tartandrive"
+     )
+diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
+index 86eebdb..b8366c2 100644
+--- a/src/wm_datasets/world_model_dataset.py
++++ b/src/wm_datasets/world_model_dataset.py
+@@ -706,6 +706,7 @@ def create_world_model_dataset(
+         'use_relative_actions', 'action_scale', 'object_name',
+         'file_list', 'use_auxiliary_state',  # file_list is for CSGO DataSource
+         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',  # LeRobotDataSource
++        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
+     }
+     for key, value in kwargs.items():
+         if key in datasource_params and value is not None:
+@@ -999,6 +1000,7 @@ def create_eval_only_dataset(
+         'use_relative_actions', 'action_scale', 'object_name',
+         'file_list', 'use_auxiliary_state',
+         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',
++        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
+     }
+     for key, value in kwargs.items():
+         if key in datasource_params and value is not None:

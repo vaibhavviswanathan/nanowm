@@ -78,7 +78,10 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "nano-world-model"]
+# Import resolution: upstream's tree is canonical (our scaffold dirs are
+# symlinked into it). Adding "." would shadow upstream's src/ with our partial
+# scaffold mirror — don't do it.
+pythonpath = ["nano-world-model"]
 addopts = "-ra"
 
 [tool.ruff]

@@ -2,22 +2,29 @@
 #
 # Run with:
 #   python src/main.py experiment=tartandrive dataset=offroad/tartandrive model=nanowm_s2
+#
+# Defaults:
+#   - DATASET_DIR env var points to e.g. ~/data/nanowm
+#   - frames preprocessed under $DATASET_DIR/tartandrive/{train,val}/
+#   - latents (Phase 4) under $DATASET_DIR/tartandrive_latents/{train,val}/
 
 defaults:
   - offroad/base
   - _self_
 
 name: "tartandrive"
-frame_interval: 2  # TartanDrive cam runs ~10 Hz; halve to reduce redundancy
+frame_interval: 2  # TartanDrive cam ~10 Hz; halve to reduce temporal redundancy.
 
 loader:
-  data_path: "${oc.env:DATASET_DIR}/tartandrive"
-  latents_path: "${oc.env:DATASET_DIR}/tartandrive_latents"
-  use_cached_latents: false   # flip to true after Phase 4 (latent caching)
-  normalize_action: false
-  resize_mode: "stretch"
-  train_slice_mode: "random"
-  val_slice_mode: "exhaustive"
+  data_path_train: "${oc.env:DATASET_DIR}/tartandrive/train"
+  data_path_val: "${oc.env:DATASET_DIR}/tartandrive/val"
+  # Latents are flipped on after Phase 4. The DataSource resolves the split
+  # dir as `${latents_path}/<train|val>` from `data_path_{train,val}.name`, so
+  # this one path covers both splits. CLI override:
+  #   dataset.loader.latents_path=$DATASET_DIR/tartandrive_latents \
+  #   dataset.loader.use_cached_latents=true
+  latents_path: null
+  use_cached_latents: false
 
 spec:
   action_dim: 2
