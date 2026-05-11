@@ -1,0 +1,17 @@
+# Base config for offroad datasets. Mirrors the structure of dino_wm/base.yaml
+# from nano-world-model — adjust if your repo's base contract differs.
+
+defaults:
+  - _self_
+
+# Validation sampling: exhaustive at fixed start indices for reproducibility.
+validation_size: 32
+val_slice_mode: exhaustive
+
+# Training sampling: random — TartanDrive trajectories are long enough that
+# enumerating all windows is wasteful.
+train_slice_mode: random
+
+# Action normalization. TartanDrive throttle/steer are nominally [-1, 1]; turn
+# this on if your stats.json shows otherwise.
+normalize_action: false

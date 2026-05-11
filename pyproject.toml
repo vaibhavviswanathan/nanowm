@@ -1,0 +1,89 @@
+[project]
+name = "nanowm-tartandrive"
+version = "0.1.0"
+description = "TartanDrive x nano-world-model POC"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    # Core
+    "numpy>=1.24,<2",
+    "scipy",
+    "pillow",
+    "tqdm",
+    "requests",
+
+    # Torch (CUDA 12.1 wheels via pytorch index below)
+    "torch>=2.1,<2.4",
+    "torchvision",
+
+    # PyTorch ecosystem (mirrors upstream environment.yml)
+    "timm",
+    "einops",
+    "lpips",
+    "piqa",
+    "pytorch-lightning==1.9.5",
+    "torchmetrics",
+
+    # Diffusion / generative
+    "diffusers[torch]==0.24.0",
+    "accelerate",
+    "transformers",
+
+    # Config & logging
+    "omegaconf",
+    "hydra-core",
+    "tensorboard",
+    "wandb",
+
+    # Data
+    "decord",
+    "h5py",
+    "pandas",
+    "lerobot",
+
+    # Image / video
+    "opencv-python",
+    "imageio",
+    "imageio-ffmpeg",
+    "moviepy==1.0.3",
+    "scikit-image",
+    "av",
+
+    # Eval
+    "pytorch-fid",
+    "matplotlib",
+    "seaborn",
+
+    # Misc
+    "sentencepiece",
+    "beautifulsoup4",
+    "ftfy",
+    "protobuf==4.25.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-xdist",
+    "ruff",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "nano-world-model"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

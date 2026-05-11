@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual env
+.venv/
+
+# Data and results (large, untracked by design)
+data/
+results/
+*.npy
+*.zip
+
+# nano-world-model upstream checkout (pinned via UPSTREAM_PIN, re-clone via scripts)
+nano-world-model/
+
+# Demo artifacts: keep GIFs, ignore working files
+demo/*.tmp
+demo/*.pkl
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store

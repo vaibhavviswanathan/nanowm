@@ -1,0 +1,23 @@
+# TartanDrive dataset config.
+#
+# Run with:
+#   python src/main.py experiment=tartandrive dataset=offroad/tartandrive model=nanowm_s2
+
+defaults:
+  - offroad/base
+  - _self_
+
+name: "tartandrive"
+frame_interval: 2  # TartanDrive cam runs ~10 Hz; halve to reduce redundancy
+
+loader:
+  data_path: "${oc.env:DATASET_DIR}/tartandrive"
+  latents_path: "${oc.env:DATASET_DIR}/tartandrive_latents"
+  use_cached_latents: false   # flip to true after Phase 4 (latent caching)
+  normalize_action: false
+  resize_mode: "stretch"
+  train_slice_mode: "random"
+  val_slice_mode: "exhaustive"
+
+spec:
+  action_dim: 2
