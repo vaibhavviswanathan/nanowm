@@ -61,6 +61,7 @@ dependencies = [
     "boto3",  # TartanDrive bucket listing
     "colorama",  # download_files.py imports it
     "rosbags",  # pure-Python rosbag reader for bag-to-tensor conversion
+    "setuptools<80",  # pytorch-lightning 1.9.5 imports pkg_resources, which setuptools 80+ removed
 ]
 
 [project.optional-dependencies]
