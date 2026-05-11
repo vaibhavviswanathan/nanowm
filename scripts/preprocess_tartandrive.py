@@ -109,6 +109,10 @@ def finalize(
 ) -> Tuple[int, int, List[np.ndarray]]:
     """Walk staging_dir, split bags into train/val, transfer trajectories.
 
+    If `val_fraction > 0` but the hash assignment lands zero val (possible at
+    small N where 0.9^N is non-trivial), force the last-by-sort trajectory
+    into val so training doesn't blow up at val-loader creation.
+
     Returns (n_train, n_val, all_train_actions_for_stats).
     """
     out_train = out_dir / "train"
@@ -117,16 +121,21 @@ def finalize(
     out_val.mkdir(parents=True, exist_ok=True)
 
     staged = sorted(p for p in staging_dir.iterdir() if p.is_dir())
+    staged = [p for p in staged if _validate_staging_traj(p)]
+    if not staged:
+        return 0, 0, []
+
+    assignments = [_split_assignment(p.name, val_fraction, seed) for p in staged]
+
+    # Force at least one val if requested.
+    if val_fraction > 0 and "val" not in assignments:
+        assignments[-1] = "val"
+
     n_train = 0
     n_val = 0
     train_actions: List[np.ndarray] = []
 
-    for staged_dir in staged:
-        if not _validate_staging_traj(staged_dir):
-            print(f"  skip invalid: {staged_dir.name}")
-            continue
-
-        split = _split_assignment(staged_dir.name, val_fraction, seed)
+    for staged_dir, split in zip(staged, assignments):
         target_split_dir = out_train if split == "train" else out_val
         idx = _next_traj_index(target_split_dir)
         dst = target_split_dir / f"traj_{idx:04d}"

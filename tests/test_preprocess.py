@@ -142,6 +142,20 @@ def test_finalize_records_split_and_id_in_meta(tmp_path: Path) -> None:
     assert meta["final_traj_id"] == "traj_0001"
 
 
+def test_finalize_forces_min_val(tmp_path: Path) -> None:
+    """If val_fraction > 0 but hashes land zero val, force the last to val."""
+    staging = tmp_path / "staging"
+    out = tmp_path / "out"
+    # All stems hash to train under (val_fraction=0.01, seed=42) at tiny N
+    for i in range(3):
+        _write_staged_bag(staging, f"bag_{i:04d}")
+    n_train, n_val, _ = preprocess.finalize(
+        staging, out, val_fraction=0.01, seed=42, mode="move",
+    )
+    assert n_val >= 1
+    assert n_train + n_val == 3
+
+
 def test_finalize_skips_invalid(tmp_path: Path) -> None:
     staging = tmp_path / "staging"
     out = tmp_path / "out"
