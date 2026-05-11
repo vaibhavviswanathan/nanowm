@@ -1,0 +1,65 @@
+diff --git a/src/wm_datasets/__init__.py b/src/wm_datasets/__init__.py
+index d221550..976dc04 100644
+--- a/src/wm_datasets/__init__.py
++++ b/src/wm_datasets/__init__.py
+@@ -10,7 +10,6 @@ This module provides a unified data loading pipeline with three layers:
+ from .data_source import (
+     DataSource,
+     DinoWorldModelDataSource,
+-    LeRobotDataSource,
+     TrajectoryData,
+     create_data_source,
+ )
+@@ -26,7 +25,6 @@ __all__ = [
+     # DataSource layer
+     "DataSource",
+     "DinoWorldModelDataSource",
+-    "LeRobotDataSource",
+     "TrajectoryData",
+     "create_data_source",
+ 
+diff --git a/src/wm_datasets/data_source/__init__.py b/src/wm_datasets/data_source/__init__.py
+index 8c23960..8c58408 100644
+--- a/src/wm_datasets/data_source/__init__.py
++++ b/src/wm_datasets/data_source/__init__.py
+@@ -4,7 +4,6 @@ DataSource package for world model datasets.
+ 
+ from .base import DataSource, TrajectoryData
+ from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
+-from .lerobot import LeRobotDataSource
+ from .factory import create_data_source
+ 
+ __all__ = [
+@@ -13,6 +12,5 @@ __all__ = [
+     "DinoWorldModelDataSource",
+     "PushTDataSource",
+     "DeformableEnvDataSource",
+-    "LeRobotDataSource",
+     "create_data_source",
+ ]
+diff --git a/src/wm_datasets/data_source/factory.py b/src/wm_datasets/data_source/factory.py
+index eeb4f52..5dce678 100644
+--- a/src/wm_datasets/data_source/factory.py
++++ b/src/wm_datasets/data_source/factory.py
+@@ -5,7 +5,6 @@ Factory helpers for DataSource creation.
+ from typing import Optional
+ 
+ from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
+-from .lerobot import LeRobotDataSource
+ from .game import CSGODataSource
+ from .base import DataSource
+ 
+@@ -49,9 +48,10 @@ def create_data_source(
+         )
+ 
+     if dataset_name == "rt1":
+-        # RT-1 is consumed as the lerobot HF dataset (fractal20220817_data).
+-        # `data_path` is the HF repo_id; optional `root` kwarg points to a
+-        # local mirror. No per-episode .pth format is supported.
++        # Lazy import: lerobot pulls a newer diffusers than upstream pins.
++        # Only load it when rt1 is actually requested.
++        from .lerobot import LeRobotDataSource  # noqa: PLC0415
++
+         lerobot_params = {'root', 'image_key', 'preload_trajectories', 'episodes'}
+         lerobot_kwargs = {k: v for k, v in kwargs.items() if k in lerobot_params}
+         return LeRobotDataSource(
