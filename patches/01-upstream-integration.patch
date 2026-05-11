@@ -1,8 +1,55 @@
 diff --git a/src/experiments/train_experiment.py b/src/experiments/train_experiment.py
-index ea20c4e..ffd8d25 100644
+index ea20c4e..01265c4 100644
 --- a/src/experiments/train_experiment.py
 +++ b/src/experiments/train_experiment.py
-@@ -785,7 +785,7 @@ class TrainExperiment(BaseExperiment):
+@@ -138,6 +138,19 @@ class NanoWMTrainingModule(LightningModule):
+     def _vae_encode(self, x):
+         return encode_first_stage(self.vae, x, precision=self._vae_precision)
+ 
++    def _maybe_vae_encode(self, x):
++        """Encode pixels (3 channels) through VAE; pass latents (>=4 ch) through.
++
++        DataSources can return pre-computed VAE latents instead of raw pixel
++        frames (see TartanDriveDataSource with use_cached_latents=True).
++        Cached latents are already scaled by vae.config.scaling_factor at
++        precompute time, so they're ready to feed the diffusion transformer
++        directly — skip the encode step entirely.
++        """
++        if x.shape[-3] == 3:
++            return self._vae_encode(x)
++        return x
++
+     def _vae_decode(self, z):
+         return decode_first_stage(self.vae, z, precision=self._vae_precision)
+ 
+@@ -198,7 +211,7 @@ class NanoWMTrainingModule(LightningModule):
+         with torch.no_grad():
+             b, _, _, _, _ = x.shape
+             x = rearrange(x, "b f c h w -> (b f) c h w").contiguous()
+-            x = self._vae_encode(x)
++            x = self._maybe_vae_encode(x)
+             x = rearrange(x, "(b f) c h w -> b f c h w", b=b).contiguous()
+ 
+         if self.args.model.extras == 78:
+@@ -258,7 +271,7 @@ class NanoWMTrainingModule(LightningModule):
+         with torch.no_grad():
+             b, _, _, _, _ = x.shape
+             x = rearrange(x, "b f c h w -> (b f) c h w").contiguous()
+-            x = self._vae_encode(x)
++            x = self._maybe_vae_encode(x)
+             x = rearrange(x, "(b f) c h w -> b f c h w", b=b).contiguous()
+ 
+             if self.args.model.extras == 2:
+@@ -300,7 +313,7 @@ class NanoWMTrainingModule(LightningModule):
+ 
+         with torch.no_grad():
+             x_flat = rearrange(x, "b f c h w -> (b f) c h w").contiguous()
+-            z = self._vae_encode(x_flat)
++            z = self._maybe_vae_encode(x_flat)
+             z = rearrange(z, "(b f) c h w -> b f c h w", b=B).contiguous()
+ 
+         model_kwargs = {}
+@@ -785,7 +798,7 @@ class TrainExperiment(BaseExperiment):
              val_check_interval=val_check_interval,
              check_val_every_n_epoch=None,
              accumulate_grad_batches=args.experiment.training.gradient_accumulation,
@@ -11,7 +58,7 @@ index ea20c4e..ffd8d25 100644
              num_sanity_val_steps=0,
          )
  
-@@ -826,7 +826,7 @@ class TrainExperiment(BaseExperiment):
+@@ -826,7 +839,7 @@ class TrainExperiment(BaseExperiment):
              enable_checkpointing=False,  # No checkpointing during evaluation
              logger=loggers,
              callbacks=callbacks_list,
@@ -19,4 +66,36 @@ index ea20c4e..ffd8d25 100644
 +            precision="bf16" if args.experiment.infra.mixed_precision else "32",
              num_sanity_val_steps=0,
          )
+ 
+diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
+index b8366c2..4c7d61b 100644
+--- a/src/wm_datasets/world_model_dataset.py
++++ b/src/wm_datasets/world_model_dataset.py
+@@ -547,8 +547,13 @@ class WorldModelDataset(Dataset):
+                 print("[WARNING] Applying video augmentation to validation set, not recommended.")
+             video = self.video_augmentation(video)
+ 
+-        # Resize video if needed
+-        if video.shape[-2:] != self.image_size:
++        # Resize video if needed — but only for actual pixel video (3 ch).
++        # When DataSources return pre-computed VAE latents (4+ channels), the
++        # spatial dims (e.g. 32x32 for a 256x256 image under SD VAE) don't
++        # match self.image_size by design; bilinear-interpolating latent
++        # tensors would corrupt them.
++        is_pixel_video = video.shape[-3] == 3
++        if is_pixel_video and video.shape[-2:] != self.image_size:
+             if self.resize_mode == "stretch":
+                 video = torch.nn.functional.interpolate(
+                     video,
+@@ -592,8 +597,9 @@ class WorldModelDataset(Dataset):
+         if self.normalize_state:
+             states = (states - self.state_mean) / self.state_std
+ 
+-        # Normalize pixels to [-1, 1]
+-        if self.normalize_pixel:
++        # Normalize pixels to [-1, 1]. Skip for cached latents — they're
++        # already in the scaled-latent space the model consumes directly.
++        if self.normalize_pixel and is_pixel_video:
+             # Assume video is in [0, 1] range
+             video = video * 2.0 - 1.0
  
