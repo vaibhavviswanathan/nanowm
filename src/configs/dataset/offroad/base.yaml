@@ -1,6 +1,6 @@
+# @package dataset
 # Base for offroad datasets. Mirrors dino_wm/base.yaml's shape so that
 # create_train_val_datasets receives the same set of loader kwargs.
-# @package dataset
 
 loader:
   # Filled in by per-dataset configs:
