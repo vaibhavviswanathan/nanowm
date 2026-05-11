@@ -58,6 +58,9 @@ dependencies = [
     "beautifulsoup4",
     "ftfy",
     "protobuf==4.25.3",
+    "boto3",  # TartanDrive bucket listing
+    "colorama",  # download_files.py imports it
+    "rosbags",  # pure-Python rosbag reader for bag-to-tensor conversion
 ]
 
 [project.optional-dependencies]

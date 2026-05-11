@@ -1,227 +1,209 @@
-"""Preprocess TartanDrive raw data into the layout expected by the DataSource.
+"""Finalize a TartanDrive staging directory into the DataSource layout.
 
-TartanDrive 1.0 ships per-trajectory data; the exact on-disk format depends on
-which release you downloaded. The two common cases are:
+This script consumes the output of `scripts/convert_bags.py` (which has already
+done the rosbag -> per-trajectory `frames.npy` + `actions.npy` + `meta.json`
+conversion at the target resolution) and does the remaining two things:
 
-  (a) Per-trajectory PyTorch files: <traj>/data.pt with a dict containing
-      keys like 'image_left', 'cmd', 'odom', etc.
-  (b) Per-trajectory numpy/HDF5 files with similar keys.
+  1. Split trajectories into train/ and val/ deterministically.
+  2. Compute action statistics on the train split for sanity-checking
+     normalization assumptions.
 
-If your download differs, adapt `_load_raw_trajectory` below — that's the only
-function with format-specific logic.
+Input layout (from `convert_bags.py`):
 
-Output layout (consumed by `tartandrive.py` DataSource):
+    staging_dir/
+      <bag_stem>/
+        frames.npy
+        actions.npy
+        meta.json
+
+Output layout (consumed by `TartanDriveDataSource`):
 
     out_dir/
-      train/
-        traj_0001/
-          frames.npy        # uint8 [T, H, W, 3]
-          actions.npy       # float32 [T, 2] -> (throttle, steer)
-          meta.json         # {length, source_traj_id, fps}
-      val/
-        ...
-      stats.json            # action min/max/mean/std across train set
+      train/traj_0001/{frames.npy, actions.npy, meta.json}
+      train/traj_0002/...
+      val/traj_0001/...
+      stats.json
 
 Usage:
-    python preprocess_tartandrive.py \\
-        --raw_dir /path/to/tartandrive_raw \\
-        --out_dir $DATASET_DIR/tartandrive \\
-        --resolution 256 \\
-        --val_fraction 0.1
+    uv run python scripts/preprocess_tartandrive.py \
+        --staging_dir $DATASET_DIR/tartandrive_staging \
+        --out_dir $DATASET_DIR/tartandrive \
+        --val_fraction 0.1 --seed 42 --mode move
+
+Modes:
+    --mode move (default): rename source dirs into out_dir; staging ends empty.
+    --mode copy: leave staging intact; out_dir contains independent copies.
+
+Re-run safety: existing trajectories in out_dir/{train,val} are NOT overwritten;
+re-runs assign newly-staged bags to a split based on the deterministic seed and
+the bag stem.
 """
 
 import argparse
+import hashlib
 import json
 import random
+import shutil
+import sys
 from pathlib import Path
+from typing import List, Tuple
 
 import numpy as np
-from PIL import Image
 
 
-# ---------- format-specific loader (ADAPT THIS TO YOUR DOWNLOAD) -------------
-
-def _load_raw_trajectory(traj_dir: Path):
-    """Load one trajectory from disk.
-
-    Returns:
-        frames: uint8 ndarray [T, H, W, 3] in the original resolution.
-        actions: float32 ndarray [T, 2] -> (throttle, steer).
-        fps: float, source frame rate (best effort; default 10.0).
-
-    Returns None if the trajectory can't be loaded (skipped silently).
-    """
-    # --- Case (a): a single data.pt with everything in it ---
-    pt_path = traj_dir / "data.pt"
-    if pt_path.exists():
-        import torch
-
-        data = torch.load(pt_path, map_location="cpu", weights_only=False)
-        # TODO: TartanDrive's exact key names vary across releases. Common ones:
-        #   images: 'image_left', 'image_left_color', 'rgb_left', 'image'
-        #   actions: 'cmd', 'intervention', 'control', 'action'
-        # Adjust the keys below to match your download.
-        img_key = next(
-            (k for k in ("image_left", "image_left_color", "rgb_left", "image") if k in data),
-            None,
-        )
-        cmd_key = next(
-            (k for k in ("cmd", "intervention", "control", "action") if k in data),
-            None,
-        )
-        if img_key is None or cmd_key is None:
-            print(f"  skipping {traj_dir.name}: keys not found "
-                  f"(have {list(data.keys())[:8]}...)")
-            return None
-        frames = np.asarray(data[img_key])
-        actions = np.asarray(data[cmd_key])
-
-    # --- Case (b): separate frames/ folder + actions.npy ---
-    elif (traj_dir / "actions.npy").exists() and (traj_dir / "frames").exists():
-        actions = np.load(traj_dir / "actions.npy")
-        frame_paths = sorted((traj_dir / "frames").glob("*.png"))
-        frames = np.stack([np.asarray(Image.open(p).convert("RGB")) for p in frame_paths])
-
-    else:
-        return None
-
-    # Normalize shapes / dtypes
-    if frames.ndim != 4:
-        return None
-    if frames.dtype != np.uint8:
-        frames = np.clip(frames, 0, 255).astype(np.uint8)
-    actions = actions.astype(np.float32)
-
-    # TartanDrive actions are typically [throttle, steer]. If the cmd vector
-    # has extra dims (e.g. brake), keep only the first two.
-    if actions.shape[-1] > 2:
-        actions = actions[..., :2]
-    if actions.shape[-1] != 2:
-        return None
-
-    # Align lengths if they differ slightly (cameras and CAN run at different rates).
-    T = min(len(frames), len(actions))
-    frames, actions = frames[:T], actions[:T]
-    if T < 16:  # too short to slice usefully
-        return None
-
-    return frames, actions, 10.0  # 10 fps is the documented TartanDrive cam rate
+def _validate_staging_traj(staging_traj_dir: Path) -> bool:
+    """Sanity check: required files present and shapes consistent."""
+    f = staging_traj_dir / "frames.npy"
+    a = staging_traj_dir / "actions.npy"
+    m = staging_traj_dir / "meta.json"
+    if not (f.exists() and a.exists() and m.exists()):
+        return False
+    try:
+        frames_shape = np.load(f, mmap_mode="r").shape
+        actions = np.load(a)
+        with open(m) as fh:
+            meta = json.load(fh)
+    except Exception:
+        return False
+    if frames_shape[0] != actions.shape[0] or frames_shape[0] != int(meta["length"]):
+        return False
+    return True
 
 
-# ---------- preprocessing pipeline -------------------------------------------
-
-def _resize_frames(frames: np.ndarray, resolution: int) -> np.ndarray:
-    """Resize a [T, H, W, 3] uint8 array to [T, R, R, 3]."""
-    out = np.empty((len(frames), resolution, resolution, 3), dtype=np.uint8)
-    for i, f in enumerate(frames):
-        out[i] = np.asarray(
-            Image.fromarray(f).resize((resolution, resolution), Image.BILINEAR)
-        )
-    return out
+def _split_assignment(bag_stem: str, val_fraction: float, seed: int) -> str:
+    """Deterministic 'train' vs 'val' from a stem + seed (hash-based)."""
+    h = hashlib.sha256(f"{seed}:{bag_stem}".encode()).hexdigest()
+    u = int(h[:16], 16) / float(1 << 64)
+    return "val" if u < val_fraction else "train"
 
 
-def process_split(
-    traj_dirs: list,
-    out_split_dir: Path,
-    resolution: int,
-) -> tuple:
-    """Process one split (train or val). Returns (n_kept, action_array_for_stats)."""
-    out_split_dir.mkdir(parents=True, exist_ok=True)
-    all_actions = []
-    n_kept = 0
-
-    for idx, traj_dir in enumerate(traj_dirs):
-        print(f"  [{idx + 1}/{len(traj_dirs)}] {traj_dir.name}", flush=True)
-        loaded = _load_raw_trajectory(traj_dir)
-        if loaded is None:
-            print(f"    skipped")
+def _next_traj_index(split_dir: Path) -> int:
+    """Smallest unused 4-digit index in split_dir/traj_XXXX/."""
+    existing = []
+    for p in split_dir.glob("traj_????"):
+        try:
+            existing.append(int(p.name.split("_")[-1]))
+        except ValueError:
             continue
-        frames, actions, fps = loaded
-
-        frames = _resize_frames(frames, resolution)
-
-        out_traj_dir = out_split_dir / f"traj_{n_kept:04d}"
-        out_traj_dir.mkdir(exist_ok=True)
-        np.save(out_traj_dir / "frames.npy", frames)
-        np.save(out_traj_dir / "actions.npy", actions)
-        with open(out_traj_dir / "meta.json", "w") as f:
-            json.dump(
-                {
-                    "length": int(len(frames)),
-                    "source_traj_id": traj_dir.name,
-                    "fps": float(fps),
-                },
-                f,
-                indent=2,
-            )
-
-        all_actions.append(actions)
-        n_kept += 1
-
-    return n_kept, all_actions
+    return (max(existing) + 1) if existing else 1
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--raw_dir", type=Path, required=True,
-                        help="Directory containing raw TartanDrive trajectory subdirs.")
-    parser.add_argument("--out_dir", type=Path, required=True,
-                        help="Where to write the processed dataset.")
-    parser.add_argument("--resolution", type=int, default=256)
-    parser.add_argument("--val_fraction", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+def _transfer(src: Path, dst: Path, mode: str) -> None:
+    """Move or copy `src` -> `dst`. Parent dir must exist."""
+    if dst.exists():
+        raise FileExistsError(f"refusing to overwrite existing: {dst}")
+    if mode == "move":
+        shutil.move(str(src), str(dst))
+    elif mode == "copy":
+        shutil.copytree(src, dst)
+    else:
+        raise ValueError(f"mode must be 'move' or 'copy', got {mode!r}")
 
-    random.seed(args.seed)
 
-    # Discover trajectory directories. TartanDrive typically nests one level
-    # deep (e.g. raw_dir/traj_0001/data.pt). Adjust if yours is different.
-    traj_dirs = sorted([p for p in args.raw_dir.iterdir() if p.is_dir()])
-    if not traj_dirs:
-        raise SystemExit(f"No trajectory directories found in {args.raw_dir}")
+def finalize(
+    staging_dir: Path,
+    out_dir: Path,
+    val_fraction: float,
+    seed: int,
+    mode: str,
+) -> Tuple[int, int, List[np.ndarray]]:
+    """Walk staging_dir, split bags into train/val, transfer trajectories.
 
-    print(f"Found {len(traj_dirs)} candidate trajectory directories.")
+    Returns (n_train, n_val, all_train_actions_for_stats).
+    """
+    out_train = out_dir / "train"
+    out_val = out_dir / "val"
+    out_train.mkdir(parents=True, exist_ok=True)
+    out_val.mkdir(parents=True, exist_ok=True)
 
-    # Train/val split — random across trajectories. If you have a way to split
-    # spatially (e.g. by GPS region), prefer that to reduce leakage.
-    random.shuffle(traj_dirs)
-    n_val = max(1, int(len(traj_dirs) * args.val_fraction))
-    val_dirs = traj_dirs[:n_val]
-    train_dirs = traj_dirs[n_val:]
-    print(f"Split: {len(train_dirs)} train, {len(val_dirs)} val")
+    staged = sorted(p for p in staging_dir.iterdir() if p.is_dir())
+    n_train = 0
+    n_val = 0
+    train_actions: List[np.ndarray] = []
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    for staged_dir in staged:
+        if not _validate_staging_traj(staged_dir):
+            print(f"  skip invalid: {staged_dir.name}")
+            continue
 
-    print("\nProcessing train split...")
-    n_train, train_actions = process_split(
-        train_dirs, args.out_dir / "train", args.resolution
-    )
+        split = _split_assignment(staged_dir.name, val_fraction, seed)
+        target_split_dir = out_train if split == "train" else out_val
+        idx = _next_traj_index(target_split_dir)
+        dst = target_split_dir / f"traj_{idx:04d}"
 
-    print("\nProcessing val split...")
-    n_val_kept, _ = process_split(
-        val_dirs, args.out_dir / "val", args.resolution
-    )
+        _transfer(staged_dir, dst, mode)
 
-    # Compute action stats from train set (sanity check for normalization).
+        with open(dst / "meta.json") as fh:
+            meta = json.load(fh)
+        meta["assigned_split"] = split
+        meta["final_traj_id"] = dst.name
+        with open(dst / "meta.json", "w") as fh:
+            json.dump(meta, fh, indent=2)
+
+        if split == "train":
+            train_actions.append(np.load(dst / "actions.npy"))
+            n_train += 1
+        else:
+            n_val += 1
+
+    return n_train, n_val, train_actions
+
+
+def write_stats(out_dir: Path, n_train: int, n_val: int, train_actions: List[np.ndarray]) -> dict:
+    """Compute action stats across the train set and write `out_dir/stats.json`."""
+    stats = {
+        "n_train_trajectories": int(n_train),
+        "n_val_trajectories": int(n_val),
+    }
     if train_actions:
         all_actions = np.concatenate(train_actions, axis=0)
-        stats = {
-            "n_train_trajectories": int(n_train),
-            "n_val_trajectories": int(n_val_kept),
-            "n_train_frames": int(len(all_actions)),
-            "action_dim": 2,
-            "action_min": all_actions.min(axis=0).tolist(),
-            "action_max": all_actions.max(axis=0).tolist(),
-            "action_mean": all_actions.mean(axis=0).tolist(),
-            "action_std": all_actions.std(axis=0).tolist(),
-        }
-        with open(args.out_dir / "stats.json", "w") as f:
-            json.dump(stats, f, indent=2)
-        print("\nAction stats:")
-        print(json.dumps(stats, indent=2))
+        stats.update(
+            {
+                "n_train_frames": int(len(all_actions)),
+                "action_dim": int(all_actions.shape[-1]),
+                "action_min": all_actions.min(axis=0).tolist(),
+                "action_max": all_actions.max(axis=0).tolist(),
+                "action_mean": all_actions.mean(axis=0).tolist(),
+                "action_std": all_actions.std(axis=0).tolist(),
+            }
+        )
+    with open(out_dir / "stats.json", "w") as fh:
+        json.dump(stats, fh, indent=2)
+    return stats
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--staging_dir", type=Path, required=True)
+    parser.add_argument("--out_dir", type=Path, required=True)
+    parser.add_argument("--val_fraction", type=float, default=0.1)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--mode", choices=["move", "copy"], default="move",
+        help="'move' (default): staging ends empty. 'copy': keep staging intact.",
+    )
+    args = parser.parse_args()
+    random.seed(args.seed)
+
+    if not args.staging_dir.exists():
+        print(f"staging_dir does not exist: {args.staging_dir}", file=sys.stderr)
+        return 2
+
+    print(f"Finalizing {args.staging_dir} -> {args.out_dir} (mode={args.mode})")
+    n_train, n_val, train_actions = finalize(
+        args.staging_dir, args.out_dir,
+        val_fraction=args.val_fraction, seed=args.seed, mode=args.mode,
+    )
+    print(f"\nSplit: {n_train} train, {n_val} val")
+
+    stats = write_stats(args.out_dir, n_train, n_val, train_actions)
+    print("\nAction stats (train):")
+    print(json.dumps(stats, indent=2))
     print(f"\nDone. Output: {args.out_dir}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
