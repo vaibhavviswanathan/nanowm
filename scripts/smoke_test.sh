@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
-# Phase 3: 200-step smoke test on the new TartanDrive dataset.
+# Phase 3: 200-step smoke test on the TartanDrive dataset.
 #
-# Goal: confirm the DataSource loads, the model trains for a few steps without
-# OOM/NaN, validation runs, and a checkpoint saves. The output will look like
-# noise — that's expected at 200 steps.
+# Pass criteria are codified in scripts/check_smoke.py — run that after this
+# completes (or pipe through it) to gate the next phase.
+#
+# Goal of this script: confirm the DataSource loads, training advances for a
+# few hundred steps without OOM/NaN, validation runs, and a checkpoint saves.
+# Output will look like noise at 200 steps — that's expected.
 
 set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UPSTREAM_DIR="${REPO_ROOT}/nano-world-model"
 
 : "${DATASET_DIR:?DATASET_DIR not set}"
 : "${RESULTS_DIR:?RESULTS_DIR not set}"
 
-python src/main.py \
+# Disable wandb for unattended POC runs. Override with WANDB_MODE=online to use it.
+export WANDB_MODE="${WANDB_MODE:-disabled}"
+
+# Hydra resolves dataset paths relative to invocation cwd; run from upstream
+# root so `from src.* import ...` resolves.
+cd "${UPSTREAM_DIR}"
+
+uv run --project "${REPO_ROOT}" python src/main.py \
     experiment=tartandrive \
     dataset=offroad/tartandrive \
     model=nanowm_s2 \
     experiment.training.max_steps=200 \
     experiment.training.batch_size=1 \
-    experiment.infra.mixed_precision=bf16 \
     experiment.training.val_every_n_steps=100 \
-    metrics.log_every_n_train_steps=999999 \
+    experiment.training.log_every=10 \
+    experiment.training.gradient_accumulation=1 \
+    experiment.infra.mixed_precision=true \
+    experiment.infra.vae_precision=fp32 \
+    experiment.infra.compile=false \
     "$@"
 
 echo
-echo "Smoke test complete. Check:"
-echo "  - Loss decreased (look at tensorboard or stdout)"
-echo "  - Checkpoint exists: \$RESULTS_DIR/<run>/checkpoints/latest/"
-echo "  - No NaNs or OOMs"
+echo "Smoke run complete. Validate with:"
+echo "  uv run python scripts/check_smoke.py \$RESULTS_DIR/<latest_run>"

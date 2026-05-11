@@ -1,182 +1,136 @@
-"""Phase 6: generate side-by-side prediction-vs-ground-truth GIFs.
+"""Phase 6: produce side-by-side prediction-vs-ground-truth GIFs.
 
-Picks N held-out val trajectories, conditions on the first `context_frames`
-real frames, then autoregressively rolls out for `rollout_length` steps using
-the trajectory's *recorded* actions. Saves a GIF per episode comparing the
-generated rollout against the actual recording.
+Thin wrapper over upstream `src/sample/rollout.py`:
+
+  1. Invoke upstream's rollout with our config + checkpoint.
+  2. Convert the saved comparison MP4s to GIFs (with imageio) for the POC
+     artifact.
+
+We don't reimplement the autoregressive flow — it's already in upstream's
+`rollout.py` (which calls `dfot_sample` from `src/diffusion/df_sample.py`).
+Our value-add is just the artifact format.
 
 Usage:
-    python rollout_demo.py \\
-        --checkpoint $RESULTS_DIR/<run>/checkpoints/latest/checkpoint.ckpt \\
-        --data_dir $DATASET_DIR/tartandrive \\
-        --out_dir ./demo \\
-        --num_episodes 6 \\
-        --rollout_length 50 \\
-        --context_frames 2
+    bash scripts/rollout_demo.py \
+        --config $RESULTS_DIR/<run>/.hydra/config.yaml \
+        --checkpoint $RESULTS_DIR/<run>/checkpoints/latest/checkpoint.ckpt \
+        --out_dir ./demo \
+        --num_samples 6 --rollout_length 50 --history_length 4
 
-# TODO: nano-world-model exposes its rollout API through a wrapper class —
-# the exact name depends on the repo. Check `src/main.py` and the
-# `docs/applications/long_rollout.md` doc for the canonical entry point.
-# Likely candidates: `WorldModel.rollout(...)`, `inference.rollout_autoregressive(...)`.
-# Adapt the `run_rollout` function below to match.
+The `--config` is the Hydra config that training wrote to its run directory.
 """
 
 import argparse
-import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+import imageio
 import numpy as np
-import torch
-from PIL import Image
-from tqdm import tqdm
 
 
-def load_model(checkpoint_path: str, device: str):
-    """Load a trained nano-world-model checkpoint.
-
-    Replace the body of this function with the canonical loading helper from
-    your repo. Most likely path:
-
-        from src.models.world_model import WorldModel
-        model = WorldModel.load_from_checkpoint(checkpoint_path)
-        model = model.to(device).eval()
-        return model
-    """
-    # TODO: adapt to your checkpoint loader
-    from src.models.world_model import WorldModel  # type: ignore
-
-    model = WorldModel.load_from_checkpoint(checkpoint_path)
-    return model.to(device).eval()
+REPO_ROOT = Path(__file__).resolve().parents[1]
+UPSTREAM_DIR = REPO_ROOT / "nano-world-model"
+UPSTREAM_ROLLOUT = UPSTREAM_DIR / "src" / "sample" / "rollout.py"
 
 
-@torch.no_grad()
-def run_rollout(
-    model,
-    context_frames: np.ndarray,   # uint8 [C, H, W, 3]
-    actions: np.ndarray,          # float32 [T, 2], T = context + rollout
-    num_ddim_steps: int = 50,
-    device: str = "cuda",
-):
-    """Autoregressive rollout. Returns uint8 [T, H, W, 3] generated frames.
+def run_upstream_rollout(
+    config: Path, checkpoint: Path, save_path: Path,
+    num_samples: int, rollout_length: int, history_length: int,
+    num_sampling_steps: int, fps: int,
+) -> None:
+    """Invoke upstream's rollout.py with our args."""
+    if not UPSTREAM_ROLLOUT.exists():
+        raise FileNotFoundError(
+            f"Upstream rollout not found at {UPSTREAM_ROLLOUT}. "
+            "Did you clone nano-world-model and run apply_upstream_patches.sh?"
+        )
 
-    The first `len(context_frames)` are the conditioning frames (echoed back).
-    """
-    # uint8 [C, H, W, 3] -> [1, C, 3, H, W] in [-1, 1]
-    ctx = torch.from_numpy(context_frames).to(device)
-    ctx = ctx.permute(0, 3, 1, 2).unsqueeze(0).float() / 127.5 - 1.0
-
-    acts = torch.from_numpy(actions).to(device).unsqueeze(0)  # [1, T, 2]
-
-    # TODO: your repo's rollout entry point. Most likely shape:
-    out = model.rollout(
-        context_frames=ctx,
-        actions=acts,
-        num_steps=num_ddim_steps,
-        scheduling="sequential",
-    )  # expected: [1, T, 3, H, W] in [-1, 1]
-
-    out = out.squeeze(0).clamp(-1, 1)
-    out = ((out + 1.0) * 127.5).byte().permute(0, 2, 3, 1).cpu().numpy()
-    return out
+    cmd = [
+        sys.executable, str(UPSTREAM_ROLLOUT),
+        "--config", str(config),
+        "--ckpt", str(checkpoint),
+        "--save_path", str(save_path),
+        "--num_samples", str(num_samples),
+        "--rollout_length", str(rollout_length),
+        "--history_length", str(history_length),
+        "--num_sampling_steps", str(num_sampling_steps),
+        "--fps", str(fps),
+    ]
+    print("[rollout_demo] invoking:", " ".join(cmd))
+    # Run with PYTHONPATH so upstream's `from src.*` imports resolve.
+    env = {"PYTHONPATH": str(UPSTREAM_DIR), **dict(__import__("os").environ)}
+    subprocess.check_call(cmd, env=env)
 
 
-def save_side_by_side_gif(
-    pred: np.ndarray,    # uint8 [T, H, W, 3]
-    truth: np.ndarray,   # uint8 [T, H, W, 3]
-    out_path: Path,
-    fps: int = 10,
-):
-    """Save a side-by-side GIF: pred on the left, ground truth on the right."""
-    T = min(len(pred), len(truth))
-    frames = []
-    for t in range(T):
-        # pad ground truth if it's shorter than pred
-        gt = truth[t] if t < len(truth) else np.zeros_like(pred[t])
-        side = np.concatenate([pred[t], gt], axis=1)  # along width
-        frames.append(Image.fromarray(side))
+def mp4_to_gif(mp4_path: Path, gif_path: Path, fps: int = 10) -> None:
+    """Read an MP4 with imageio and write a GIF at the same fps."""
+    reader = imageio.get_reader(str(mp4_path))
+    frames = [np.asarray(frame) for frame in reader]
+    duration = 1.0 / fps
+    imageio.mimsave(str(gif_path), frames, duration=duration, loop=0)
 
-    duration_ms = int(1000 / fps)
-    frames[0].save(
-        out_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=duration_ms,
-        loop=0,
+
+def convert_all_mp4s(save_dir: Path, out_dir: Path, fps: int) -> int:
+    """Convert every *_compare.mp4 in save_dir to a GIF in out_dir."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mp4s = sorted(save_dir.glob("*_compare.mp4"))
+    if not mp4s:
+        print(f"[rollout_demo] no *_compare.mp4 in {save_dir}")
+        return 0
+    for mp4 in mp4s:
+        gif = out_dir / (mp4.stem + ".gif")
+        print(f"  {mp4.name} -> {gif.name}")
+        mp4_to_gif(mp4, gif, fps=fps)
+    return len(mp4s)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-
-
-def main():
-    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, required=True,
+                        help="Hydra config from the training run (e.g. <run>/.hydra/config.yaml).")
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--data_dir", type=Path, required=True)
-    parser.add_argument("--out_dir", type=Path, required=True)
-    parser.add_argument("--num_episodes", type=int, default=6)
+    parser.add_argument("--out_dir", type=Path, required=True,
+                        help="Output dir for GIFs.")
+    parser.add_argument("--num_samples", type=int, default=6)
     parser.add_argument("--rollout_length", type=int, default=50)
-    parser.add_argument("--context_frames", type=int, default=2)
-    parser.add_argument("--num_ddim_steps", type=int, default=50)
-    parser.add_argument("--device", default="cuda")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--history_length", type=int, default=4)
+    parser.add_argument("--num_sampling_steps", type=int, default=50)
+    parser.add_argument("--fps", type=int, default=10)
+    parser.add_argument("--mp4_dir", type=Path, default=None,
+                        help="Tmp dir for upstream's MP4 outputs (default: <out_dir>/_mp4).")
+    parser.add_argument("--keep_mp4", action="store_true",
+                        help="Don't delete the MP4 directory after GIF conversion.")
     args = parser.parse_args()
 
+    if not args.config.exists():
+        print(f"config not found: {args.config}", file=sys.stderr)
+        return 2
+    if not args.checkpoint.exists():
+        print(f"checkpoint not found: {args.checkpoint}", file=sys.stderr)
+        return 2
+
+    mp4_dir = args.mp4_dir or (args.out_dir / "_mp4")
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading checkpoint: {args.checkpoint}")
-    model = load_model(str(args.checkpoint), args.device)
-
-    val_dir = args.data_dir / "val"
-    traj_dirs = sorted([p for p in val_dir.iterdir() if p.is_dir()])
-
-    rng = np.random.default_rng(args.seed)
-    chosen = rng.choice(
-        len(traj_dirs),
-        size=min(args.num_episodes, len(traj_dirs)),
-        replace=False,
+    run_upstream_rollout(
+        config=args.config, checkpoint=args.checkpoint, save_path=mp4_dir,
+        num_samples=args.num_samples, rollout_length=args.rollout_length,
+        history_length=args.history_length,
+        num_sampling_steps=args.num_sampling_steps, fps=args.fps,
     )
 
-    total_len = args.context_frames + args.rollout_length
+    n = convert_all_mp4s(mp4_dir, args.out_dir, fps=args.fps)
+    print(f"\nDone. {n} GIFs in {args.out_dir}.")
 
-    for i in tqdm(chosen):
-        traj_dir = traj_dirs[i]
-        frames = np.load(traj_dir / "frames.npy")
-        actions = np.load(traj_dir / "actions.npy")
-
-        if len(frames) < total_len:
-            print(f"  skipping {traj_dir.name} (too short)")
-            continue
-
-        # Use the first total_len frames/actions of the trajectory.
-        ctx_frames = frames[: args.context_frames]
-        rollout_actions = actions[:total_len].astype(np.float32)
-        ground_truth = frames[:total_len]
-
-        pred = run_rollout(
-            model,
-            ctx_frames,
-            rollout_actions,
-            num_ddim_steps=args.num_ddim_steps,
-            device=args.device,
-        )
-
-        out_path = args.out_dir / f"{traj_dir.name}_compare.gif"
-        save_side_by_side_gif(pred, ground_truth, out_path)
-        print(f"  -> {out_path}")
-
-    # Drop a small index file with metadata so the demo is self-describing.
-    with open(args.out_dir / "demo_info.json", "w") as f:
-        json.dump(
-            {
-                "checkpoint": str(args.checkpoint),
-                "num_episodes": int(len(chosen)),
-                "rollout_length": args.rollout_length,
-                "context_frames": args.context_frames,
-                "num_ddim_steps": args.num_ddim_steps,
-            },
-            f,
-            indent=2,
-        )
-
-    print(f"\nDone. Demo GIFs in {args.out_dir}")
+    if not args.keep_mp4 and mp4_dir.exists():
+        shutil.rmtree(mp4_dir)
+        print(f"Removed temp MP4 dir: {mp4_dir}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,0 +1,23 @@
+# TartanDrive POC experiment config.
+# Tuned for a 16 GB laptop GPU; tighter than upstream defaults.
+
+defaults:
+  - default
+
+training:
+  optimizer:
+    lr: 1e-4
+  max_steps: 30000
+  batch_size: 1
+  gradient_accumulation: 4   # effective batch size = 4
+  val_every_n_steps: 2000
+  log_every: 100
+
+infra:
+  num_workers: 4
+  # torch.compile is fast on big-GPU clusters but costs minutes-of-compile
+  # for marginal throughput on a laptop. Off by default for the POC; flip
+  # if you see iter-time benefit on your hardware.
+  compile: false
+  mixed_precision: true      # bf16-mixed; fp32 master params + opt state
+  vae_precision: fp32        # SD VAE wants fp32 for clean recon
