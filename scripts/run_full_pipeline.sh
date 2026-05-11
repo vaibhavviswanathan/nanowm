@@ -15,6 +15,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 SHARD_STEM="${1:-20210828_heightmaps_1}"
+FRESH="${FRESH:-0}"   # FRESH=1 wipes tartandrive/ + tartandrive_latents/ first
 
 : "${DATASET_DIR:?DATASET_DIR not set}"
 : "${RESULTS_DIR:?RESULTS_DIR not set}"
@@ -23,6 +24,11 @@ BAGS_DIR="${DATASET_DIR}/raw_bags/${SHARD_STEM}/${SHARD_STEM}"
 STAGING_DIR="${DATASET_DIR}/tartandrive_staging"
 DATA_DIR="${DATASET_DIR}/tartandrive"
 LATENTS_DIR="${DATASET_DIR}/tartandrive_latents"
+
+if [ "${FRESH}" = "1" ]; then
+    echo "FRESH=1: removing ${DATA_DIR} and ${LATENTS_DIR} (staging retained)"
+    rm -rf "${DATA_DIR}" "${LATENTS_DIR}"
+fi
 
 echo "=== [1/5] Convert bags -> staging"
 uv run python scripts/convert_bags.py \
