@@ -38,6 +38,7 @@ uv run --project "${REPO_ROOT}" python src/main.py \
     experiment.infra.compile=false \
     logger.name=tensorboard \
     wandb.enabled=false \
+    experiment.evaluation.metrics.evaluate=false \
     "$@"
 
 echo
