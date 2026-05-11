@@ -67,6 +67,55 @@ index ea20c4e..01265c4 100644
              num_sanity_val_steps=0,
          )
  
+diff --git a/src/sample/rollout.py b/src/sample/rollout.py
+index 2c91bd6..90faee7 100644
+--- a/src/sample/rollout.py
++++ b/src/sample/rollout.py
+@@ -149,13 +149,15 @@ def main(args):
+                 start=start_frame,
+                 end=end_frame,
+                 step=frame_interval
+-            )  # [T, C, H, W] in [0, 1]
++            )  # [T, C, H, W] in [0, 1]  OR  [T, C_lat, H', W'] if cached latents
+ 
+-            # Resize to match training resolution
+-            visual_frames = resize_frames(visual_frames, dataset.image_size, dataset.resize_mode)
+-
+-            # Normalize pixels to [-1, 1]
+-            visual_frames = visual_frames * 2.0 - 1.0
++            # Resize + normalize only for actual pixel video. Cached latents
++            # are already at latent resolution and in latent-space units.
++            is_pixel_video = visual_frames.shape[-3] == 3
++            if is_pixel_video:
++                visual_frames = resize_frames(visual_frames, dataset.image_size, dataset.resize_mode)
++                # Normalize pixels to [-1, 1]
++                visual_frames = visual_frames * 2.0 - 1.0
+ 
+             # Load raw actions from trajectory
+             traj_data = dataset.data_source.load_trajectory(traj_idx)
+diff --git a/src/sample/sampling_utils.py b/src/sample/sampling_utils.py
+index 0804d87..14b19bb 100644
+--- a/src/sample/sampling_utils.py
++++ b/src/sample/sampling_utils.py
+@@ -11,9 +11,17 @@ from utils.vae_ops import encode_first_stage, decode_first_stage
+ 
+ 
+ def encode_frames(vae, frames, device, vae_precision: str = "fp32"):
+-    """Encode [B,F,C,H,W] frames to [B,F,C_lat,H/8,W/8] scaled latents."""
++    """Encode [B,F,C,H,W] frames to [B,F,C_lat,H/8,W/8] scaled latents.
++
++    If `frames` already has non-3 channels it's assumed to be pre-computed
++    VAE latents (see TartanDriveDataSource with use_cached_latents=True) —
++    pass through unchanged.
++    """
+     B, F, C, H, W = frames.shape
+     frames = frames.to(device)
++    if C != 3:
++        # Already latents — DataSource pre-computed them, already scaled.
++        return frames
+     frames_flat = rearrange(frames, 'b f c h w -> (b f) c h w')
+     with torch.no_grad():
+         latents = encode_first_stage(vae, frames_flat, precision=vae_precision)
 diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
 index b8366c2..4c7d61b 100644
 --- a/src/wm_datasets/world_model_dataset.py
