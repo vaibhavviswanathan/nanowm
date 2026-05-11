@@ -61,8 +61,11 @@ WATCHER_DONE=$(mktemp -u)
 WATCHER_PID=$!
 
 # tar exits non-zero when the pipe closes early; allow that.
+# `-k` keeps already-extracted files: re-runs (with a larger N_BAGS) skip
+# disk writes for bags we already have, even though the tarball bytes still
+# stream through (tar.gz isn't seekable so we can't skip the bytes).
 set +e
-curl -fsSL "${SHARD_URL}" | tar -xz -C "${OUT_DIR}" --no-same-owner 2>/dev/null
+curl -fsSL "${SHARD_URL}" | tar -xzk -C "${OUT_DIR}" --no-same-owner 2>/dev/null
 set -e
 
 # Stop the watcher in case curl finished first
