@@ -151,13 +151,26 @@ def convert_bag(
             return None
 
         # Stream action messages (cheap; small).
+        action_msgtype = action_conns[0].msgtype
+        # TartanDrive 1.0's /cmd is published as TwistStamped (Twist wrapped
+        # with a header). Both shapes are supported; we reach into .twist
+        # when needed.
+        is_twist_stamped = action_msgtype.endswith("/TwistStamped")
+        is_twist = action_msgtype.endswith("/Twist")
+        if not (is_twist or is_twist_stamped):
+            raise NotImplementedError(
+                f"Unsupported action message type: {action_msgtype}. "
+                "Expected Twist or TwistStamped."
+            )
+
         action_times_ns: List[int] = []
         action_values: List[Tuple[float, float]] = []
         for connection, t_ns, raw in reader.messages(connections=action_conns):
             msg = reader.deserialize(raw, connection.msgtype)
-            # geometry_msgs/Twist: linear.x = throttle, angular.z = steering
+            twist = msg.twist if is_twist_stamped else msg
+            # linear.x = throttle, angular.z = steering
             action_times_ns.append(int(t_ns))
-            action_values.append((float(msg.linear.x), float(msg.angular.z)))
+            action_values.append((float(twist.linear.x), float(twist.angular.z)))
 
         if not action_values:
             print(f"  [{bag_stem}] skip: no action messages decoded")
