@@ -23,10 +23,13 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 def _load_loss(run_dir: Path):
     """Return list of (step, wall_time, value) for train loss."""
-    tb_dir = run_dir / "tb"
-    if not tb_dir.exists():
-        tb_dir = run_dir
-    ea = EventAccumulator(str(tb_dir))
+    # PL's TensorBoardLogger writes to tb/<logger_name>/version_N/, not the
+    # tb/ root. Recurse for the deepest events file.
+    events = sorted(run_dir.rglob("events.out.tfevents.*"))
+    if not events:
+        print(f"WARN: no tfevents under {run_dir}", file=sys.stderr)
+        return []
+    ea = EventAccumulator(str(events[0].parent))
     ea.Reload()
     tags = ea.Tags().get("scalars", [])
     for cand in ("train/loss", "train_loss", "loss/train", "loss"):
