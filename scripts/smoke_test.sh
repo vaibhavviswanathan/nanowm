@@ -32,9 +32,12 @@ uv run --project "${REPO_ROOT}" python src/main.py \
     experiment.training.val_every_n_steps=100 \
     experiment.training.log_every=10 \
     experiment.training.gradient_accumulation=1 \
+    experiment.training.checkpointing.latest.every_n_train_steps=100 \
     experiment.infra.mixed_precision=true \
     experiment.infra.vae_precision=fp32 \
     experiment.infra.compile=false \
+    logger.name=tensorboard \
+    wandb.enabled=false \
     "$@"
 
 echo

@@ -35,4 +35,6 @@ uv run --project "${REPO_ROOT}" python src/main.py \
     experiment.infra.mixed_precision=true \
     experiment.infra.vae_precision=fp32 \
     experiment.infra.compile=false \
+    logger.name=tensorboard \
+    wandb.enabled=false \
     "$@"

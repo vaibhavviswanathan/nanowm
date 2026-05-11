@@ -1,163 +1,22 @@
 diff --git a/src/experiments/train_experiment.py b/src/experiments/train_experiment.py
-index 3b95597..ea20c4e 100644
+index ea20c4e..ffd8d25 100644
 --- a/src/experiments/train_experiment.py
 +++ b/src/experiments/train_experiment.py
-@@ -83,7 +83,14 @@ class NanoWMTrainingModule(LightningModule):
-             zero_terminal_snr=args.experiment.diffusion.zero_terminal_snr,
-         )
-         print(f"[Init] Loading VAE from: {args.vae_model_path}", flush=True)
--        self.vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
-+        # Try subfolder='vae' first (works for SD pipeline repos like
-+        # runwayml/stable-diffusion-v1-5). Fall back to no subfolder for
-+        # standalone VAE repos like stabilityai/sd-vae-ft-mse (the default
-+        # in upstream config.yaml), which has config.json at root.
-+        try:
-+            self.vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
-+        except (OSError, ValueError):
-+            self.vae = AutoencoderKL.from_pretrained(args.vae_model_path)
-         # Trust whatever VAE was passed in — read its own scaling factor rather
-         # than baking in 0.18215 (SD 1.x) or any other constant. PixArt/SDXL use
-         # 0.13025, Flux uses 0.3611, etc.
-diff --git a/src/sample/rollout.py b/src/sample/rollout.py
-index b65a188..2c91bd6 100644
---- a/src/sample/rollout.py
-+++ b/src/sample/rollout.py
-@@ -59,7 +59,11 @@ def main(args):
-     model.eval()
-     
-     print("Loading VAE...")
--    vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae").to(device)
-+    try:
-+        vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
-+    except (OSError, ValueError):
-+        vae = AutoencoderKL.from_pretrained(args.vae_model_path)
-+    vae = vae.to(device)
-     vae.eval()
-     vae_precision = getattr(args.experiment.infra, "vae_precision", "fp32")
-     
-diff --git a/src/sample/sample_dfot.py b/src/sample/sample_dfot.py
-index d4626e3..dbd8dff 100644
---- a/src/sample/sample_dfot.py
-+++ b/src/sample/sample_dfot.py
-@@ -86,7 +86,11 @@ def main(args):
-     model.eval()
-     
-     print("Loading VAE...")
--    vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae").to(device)
-+    try:
-+        vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
-+    except (OSError, ValueError):
-+        vae = AutoencoderKL.from_pretrained(args.vae_model_path)
-+    vae = vae.to(device)
-     vae.eval()
-     vae_precision = getattr(args.experiment.infra, "vae_precision", "fp32")
-     
-diff --git a/src/wm_datasets/__init__.py b/src/wm_datasets/__init__.py
-index d221550..976dc04 100644
---- a/src/wm_datasets/__init__.py
-+++ b/src/wm_datasets/__init__.py
-@@ -10,7 +10,6 @@ This module provides a unified data loading pipeline with three layers:
- from .data_source import (
-     DataSource,
-     DinoWorldModelDataSource,
--    LeRobotDataSource,
-     TrajectoryData,
-     create_data_source,
- )
-@@ -26,7 +25,6 @@ __all__ = [
-     # DataSource layer
-     "DataSource",
-     "DinoWorldModelDataSource",
--    "LeRobotDataSource",
-     "TrajectoryData",
-     "create_data_source",
- 
-diff --git a/src/wm_datasets/data_source/__init__.py b/src/wm_datasets/data_source/__init__.py
-index 8c23960..8c58408 100644
---- a/src/wm_datasets/data_source/__init__.py
-+++ b/src/wm_datasets/data_source/__init__.py
-@@ -4,7 +4,6 @@ DataSource package for world model datasets.
- 
- from .base import DataSource, TrajectoryData
- from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
--from .lerobot import LeRobotDataSource
- from .factory import create_data_source
- 
- __all__ = [
-@@ -13,6 +12,5 @@ __all__ = [
-     "DinoWorldModelDataSource",
-     "PushTDataSource",
-     "DeformableEnvDataSource",
--    "LeRobotDataSource",
-     "create_data_source",
- ]
-diff --git a/src/wm_datasets/data_source/factory.py b/src/wm_datasets/data_source/factory.py
-index eeb4f52..4ffb4ab 100644
---- a/src/wm_datasets/data_source/factory.py
-+++ b/src/wm_datasets/data_source/factory.py
-@@ -5,7 +5,6 @@ Factory helpers for DataSource creation.
- from typing import Optional
- 
- from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
--from .lerobot import LeRobotDataSource
- from .game import CSGODataSource
- from .base import DataSource
- 
-@@ -49,9 +48,10 @@ def create_data_source(
+@@ -785,7 +785,7 @@ class TrainExperiment(BaseExperiment):
+             val_check_interval=val_check_interval,
+             check_val_every_n_epoch=None,
+             accumulate_grad_batches=args.experiment.training.gradient_accumulation,
+-            precision="bf16-mixed" if args.experiment.infra.mixed_precision else "32",
++            precision="bf16" if args.experiment.infra.mixed_precision else "32",
+             num_sanity_val_steps=0,
          )
  
-     if dataset_name == "rt1":
--        # RT-1 is consumed as the lerobot HF dataset (fractal20220817_data).
--        # `data_path` is the HF repo_id; optional `root` kwarg points to a
--        # local mirror. No per-episode .pth format is supported.
-+        # Lazy import: lerobot pulls a newer diffusers than upstream pins.
-+        # Only load it when rt1 is actually requested.
-+        from .lerobot import LeRobotDataSource  # noqa: PLC0415
-+
-         lerobot_params = {'root', 'image_key', 'preload_trajectories', 'episodes'}
-         lerobot_kwargs = {k: v for k, v in kwargs.items() if k in lerobot_params}
-         return LeRobotDataSource(
-@@ -72,7 +72,22 @@ def create_data_source(
-             **csgo_kwargs
+@@ -826,7 +826,7 @@ class TrainExperiment(BaseExperiment):
+             enable_checkpointing=False,  # No checkpointing during evaluation
+             logger=loggers,
+             callbacks=callbacks_list,
+-            precision="bf16-mixed" if args.experiment.infra.mixed_precision else "32",
++            precision="bf16" if args.experiment.infra.mixed_precision else "32",
+             num_sanity_val_steps=0,
          )
  
-+    if dataset_name == "tartandrive":
-+        # Lazy import: avoids loading offroad code (and its torch/numpy paths)
-+        # when other datasets are used.
-+        from .offroad.tartandrive import TartanDriveDataSource  # noqa: PLC0415
-+
-+        tartandrive_kwargs = {
-+            k: v for k, v in kwargs.items()
-+            if k in ['latents_path', 'use_cached_latents']
-+        }
-+        return TartanDriveDataSource(
-+            data_path=data_path,
-+            n_rollout=n_rollout,
-+            **tartandrive_kwargs,
-+        )
-+
-     raise ValueError(
-         f"Unknown dataset: {dataset_name}. "
--        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo"
-+        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo, tartandrive"
-     )
-diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
-index 86eebdb..b8366c2 100644
---- a/src/wm_datasets/world_model_dataset.py
-+++ b/src/wm_datasets/world_model_dataset.py
-@@ -706,6 +706,7 @@ def create_world_model_dataset(
-         'use_relative_actions', 'action_scale', 'object_name',
-         'file_list', 'use_auxiliary_state',  # file_list is for CSGO DataSource
-         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',  # LeRobotDataSource
-+        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
-     }
-     for key, value in kwargs.items():
-         if key in datasource_params and value is not None:
-@@ -999,6 +1000,7 @@ def create_eval_only_dataset(
-         'use_relative_actions', 'action_scale', 'object_name',
-         'file_list', 'use_auxiliary_state',
-         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',
-+        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
-     }
-     for key, value in kwargs.items():
-         if key in datasource_params and value is not None:
