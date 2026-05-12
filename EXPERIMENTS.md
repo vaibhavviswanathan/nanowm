@@ -100,3 +100,33 @@ Same as exp01 (NanoWM-S/2, 256², 8-frame clips at frame_interval=2, bs=1 × gra
 - Other deferred enhancements (best-by-val checkpoint policy, h-flip augmentation, fixing the metrics callback for cached latents) are smaller-impact and can wait.
 
 ---
+
+## exp03 — IN PROGRESS (all 23 shards on Tensorbook)
+
+**Status as of commit:** pulling shards 6–23 (already have 1–5 from exp02); preprocess+latents+train 100k steps will fire automatically when downloads complete.
+
+### Plan
+- 23 shards × 10 bags = ~210 trajectories after truncated-bag drops (~50k frames, ~25× exp01).
+- Disk-conscious ingest: `scripts/pull_convert_clean.sh` chains the pulls and converts+deletes per shard so peak disk stays ~30 GB.
+- FRESH preprocess + latents (staging retains all conversions).
+- Train **100,000 steps** (3.3× exp02's actual 30k cap) — extrapolating from exp02's val bottom at step 15k with 5× data, val should keep improving into the 60k+ range on full data.
+
+### Auto-triggered chain
+- `bash scripts/pull_convert_clean.sh` for shards 6–10 (running)
+- `bash scripts/pull_convert_clean.sh` for shards 11–23 (queued after the above)
+- Then: `rm -rf tartandrive/ tartandrive_latents/` + preprocess + latents + `STEPS=100000 bash scripts/train.sh`
+
+### ETA at submission time
+- Downloads: ~13–14 hr
+- Preprocess + latents: ~30 min
+- Training: ~7.5 hr at 3.7 steps/s
+- **Total ~21 hr unattended.**
+
+### Will be filled in on completion
+- Final train/val split sizes
+- Step rate observed
+- val_loss trajectory + best-by-val step
+- Demo GIFs (will live in `experiments/exp03_<N>trajs_step<X>k/demo/`)
+- Tag: `poc-v3`
+
+---
