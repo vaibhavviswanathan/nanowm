@@ -101,32 +101,63 @@ Same as exp01 (NanoWM-S/2, 256², 8-frame clips at frame_interval=2, bs=1 × gra
 
 ---
 
-## exp03 — IN PROGRESS (all 23 shards on Tensorbook)
+## exp03 — 49 trajectories, 50k steps (more-but-worse: data quality regression)
 
-**Status as of commit:** pulling shards 6–23 (already have 1–5 from exp02); preprocess+latents+train 100k steps will fire automatically when downloads complete.
+**Tag:** `poc-v3`
+**Date:** 2026-05-13
 
-### Plan
-- 23 shards × 10 bags = ~210 trajectories after truncated-bag drops (~50k frames, ~25× exp01).
-- Disk-conscious ingest: `scripts/pull_convert_clean.sh` chains the pulls and converts+deletes per shard so peak disk stays ~30 GB.
-- FRESH preprocess + latents (staging retains all conversions).
-- Train **100,000 steps** (3.3× exp02's actual 30k cap) — extrapolating from exp02's val bottom at step 15k with 5× data, val should keep improving into the 60k+ range on full data.
+### Setup
+Same as exp01/exp02 (NanoWM-S/2, 256², 8-frame clips, fi=2, bs=1 × grad_accum=4, bf16, LR 1e-4, 50k max_steps).
 
-### Auto-triggered chain
-- `bash scripts/pull_convert_clean.sh` for shards 6–10 (running)
-- `bash scripts/pull_convert_clean.sh` for shards 11–23 (queued after the above)
-- Then: `rm -rf tartandrive/ tartandrive_latents/` + preprocess + latents + `STEPS=100000 bash scripts/train.sh`
+### Data acquisition story
+Plan was 23 shards (full TartanDrive 1.0). Reality:
+- Shards 1–5 (exp02 set): fully pulled, 45 trajs from clean 20210828/29/02/03 recordings.
+- Shards 6–9 attempted: CMU bucket throttled to ~274 KB/s overnight (vs 17 MB/s the day before) — 60× slowdown. 
+- Killed the chain after shards 6, 7, 9 contributed partial data (12 more bags converted).
+- Final: **57 trajectories in staging → 49 train / 8 val after split**.
 
-### ETA at submission time
-- Downloads: ~13–14 hr
-- Preprocess + latents: ~30 min
-- Training: ~7.5 hr at 3.7 steps/s
-- **Total ~21 hr unattended.**
+### Data
+- 5 shards (partial): `20210828_heightmaps_1` (9), `20210903_heightmaps_7` (9), `20210829_heightmaps_3` (9), `20210829_heightmaps_2` (9), `20210902_heightmaps_2` (9), `20210903_heightmaps_4` (7), `20210903_heightmaps_1` (3), `20210829_heightmaps_1` (2).
+- 49 train / 8 val (val_fraction=0.1).
+- **12,551 train frames** (~21 min driving) — 1.35× exp02.
+- Action ranges: throttle `[0.000, 0.992]` mean 0.298; steer `[-1.000, 1.000]` mean -0.001.
 
-### Will be filled in on completion
-- Final train/val split sizes
-- Step rate observed
-- val_loss trajectory + best-by-val step
-- Demo GIFs (will live in `experiments/exp03_<N>trajs_step<X>k/demo/`)
-- Tag: `poc-v3`
+### Training
+- 50,000 steps over ~3.8 hr at 3.65 steps/s.
+- train_loss: 0.472 → 0.302 (smooth descent)
+- **val_loss BEST: 0.3837 @ step 15,917**
+- val_loss latest @ step 49,876: **0.4603** (deeply overfit by end)
+
+### Surprise: more data, WORSE val_loss
+
+| | exp01 | exp02 | exp03 |
+|---|---|---|---|
+| Trajectories | 8 | 45 | **49** |
+| Train frames | 1,990 | 9,340 | **12,551** |
+| Best val_loss | 0.3884 | **0.3164** | **0.3837** ⬆️ |
+| Best-val step | 2,499 | 15,262 | 15,917 |
+
+exp03 has +35% more frames than exp02 but **+21% worse best val_loss**. Two likely causes:
+1. **New bags are out-of-distribution** vs the val set. Many shard 6+ bags had `fps=6.77` (vs 10), partial topics, different recording configs. The model now sees a wider input distribution but the val (8 trajs sampled across all 57) doesn't necessarily reward that.
+2. **Truncation/quality issues**: most attempted shard 6+ bags failed conversion (missing image topic or damaged headers). Survivors may be a biased subset.
+
+### Conclusion: data *quality*, not just *count*, matters
+
+For the next iteration:
+1. **Filter bags more aggressively at ingest time**: reject bags with fps < 9 (signals dropped frames), reject bags that fail to convert cleanly, possibly even reject bags where action range is too narrow (parked vehicle).
+2. **Reserve val trajectories from the *original clean shards*** so the val set stays comparable across experiments.
+3. Don't conflate "more shards" with "more useful data". A shard with `/multisense/left/image_rect_color` consistently present is much more useful than one with sparse coverage.
+
+### Artifacts
+- Checkpoints (`$RUN_DIR/checkpoints/`):
+  - `across_timesteps/epoch=1538-step=20000.ckpt` — closest snapshot to best val
+  - `across_timesteps/epoch={769,1538,2307,3076,3846}-step={10000,20000,30000,40000,50000}.ckpt`
+  - `latest/latest-epoch=3846-step=50000.ckpt` (heavily overfit)
+- TensorBoard: `~/results/nanowm/20260513_074616-NanoWM-S-2-F8S2-tartandrive/tb/`
+- `experiments/exp03_49trajs_step50k/stats.json`
+- `experiments/exp03_49trajs_step50k/demo/sample_000{0..7}_compare.gif` — generated from the step-20000 ckpt (best-val region)
+
+### Network-throttling note
+The CMU bucket appears to rate-limit aggressively. Pulling 5 shards was fine in one continuous session; a second session ~16 hr later got throttled to 274 KB/s. Future big pulls should be from cloud (faster network) or accept the bucket's pace.
 
 ---
