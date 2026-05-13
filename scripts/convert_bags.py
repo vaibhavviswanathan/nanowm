@@ -43,6 +43,11 @@ from rosbags.highlevel import AnyReader
 DEFAULT_IMAGE_TOPIC = "/multisense/left/image_rect_color"
 DEFAULT_ACTION_TOPIC = "/cmd"
 
+# Alternate action source: the filtered odometry's twist. Forward velocity
+# (m/s) plus yaw rate (rad/s) — what the camera physically experiences,
+# bypassing the throttle -> engine -> wheels -> motion dynamics chain.
+ODOM_ACTION_TOPIC = "/odometry/filtered_odom"
+
 
 def list_bag_topics(bag_path: Path) -> None:
     """Print all topics + message types + message counts in `bag_path`."""
@@ -152,23 +157,30 @@ def convert_bag(
 
         # Stream action messages (cheap; small).
         action_msgtype = action_conns[0].msgtype
-        # TartanDrive 1.0's /cmd is published as TwistStamped (Twist wrapped
-        # with a header). Both shapes are supported; we reach into .twist
-        # when needed.
+        # Three supported shapes for the 2-D action:
+        # 1. geometry_msgs/Twist        — bare twist (.linear.x, .angular.z)
+        # 2. geometry_msgs/TwistStamped — twist wrapped with header (.twist.linear.x, ...)
+        # 3. nav_msgs/Odometry          — full odom; we read .twist.twist
         is_twist_stamped = action_msgtype.endswith("/TwistStamped")
         is_twist = action_msgtype.endswith("/Twist")
-        if not (is_twist or is_twist_stamped):
+        is_odometry = action_msgtype.endswith("/Odometry")
+        if not (is_twist or is_twist_stamped or is_odometry):
             raise NotImplementedError(
                 f"Unsupported action message type: {action_msgtype}. "
-                "Expected Twist or TwistStamped."
+                "Expected Twist, TwistStamped, or Odometry."
             )
 
         action_times_ns: List[int] = []
         action_values: List[Tuple[float, float]] = []
         for connection, t_ns, raw in reader.messages(connections=action_conns):
             msg = reader.deserialize(raw, connection.msgtype)
-            twist = msg.twist if is_twist_stamped else msg
-            # linear.x = throttle, angular.z = steering
+            if is_odometry:
+                twist = msg.twist.twist
+            elif is_twist_stamped:
+                twist = msg.twist
+            else:
+                twist = msg
+            # linear.x = forward velocity / throttle, angular.z = yaw rate / steering
             action_times_ns.append(int(t_ns))
             action_values.append((float(twist.linear.x), float(twist.angular.z)))
 
@@ -225,7 +237,9 @@ def main() -> int:
         help="Output staging dir; per-bag subdirs are created here.",
     )
     parser.add_argument("--image_topic", default=DEFAULT_IMAGE_TOPIC)
-    parser.add_argument("--action_topic", default=DEFAULT_ACTION_TOPIC)
+    parser.add_argument("--action_topic", default=DEFAULT_ACTION_TOPIC,
+                        help=f"Action topic. Defaults to {DEFAULT_ACTION_TOPIC} (Twist/TwistStamped). "
+                             f"Use {ODOM_ACTION_TOPIC} for odometry-twist (Odometry msg).")
     parser.add_argument("--resolution", type=int, default=256)
     parser.add_argument(
         "--decimate", type=int, default=2,
