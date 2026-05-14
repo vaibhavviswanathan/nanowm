@@ -161,3 +161,62 @@ For the next iteration:
 The CMU bucket appears to rate-limit aggressively. Pulling 5 shards was fine in one continuous session; a second session ~16 hr later got throttled to 274 KB/s. Future big pulls should be from cloud (faster network) or accept the bucket's pace.
 
 ---
+
+## exp04 — aborted (planned but redirected)
+
+Planned: B/2 + 16 frames + fps>=9 filter, 50k steps. Started but interrupted at ~step 800 once we realized the throttle/cmd action signal was the bigger problem to address. Decision: rewire action source to odometry velocity before retraining. No artifacts kept.
+
+---
+
+## exp05 — aborted (data scale collapse from fps filter)
+
+Planned: B/2 + 16f + odom action + fps>=9 filter. Started but val_loss was rising from step 999 (best 0.4522, latest 0.5659 at step 6999) — heavy overfit with only 16 train trajectories. Decision: stop and use the unfiltered 38-traj set so we have comparable data scale to exp02. No artifacts kept.
+
+---
+
+## exp06 — B/2 + 16 frames + odom-velocity action, 38 trajs, stopped at step ~14k
+
+**Tag:** (none — exploratory)
+**Date:** 2026-05-13
+
+### Setup
+- Model: **NanoWM-B/2** (159M params, 4× S/2)
+- Context: **num_frames=16** (2× exp02's 8)
+- Action: **odom twist** (`twist.linear.x` m/s + `twist.angular.z` rad/s from `/odometry/filtered_odom`) — bypasses the throttle → engine → wheel dynamics chain entirely
+- `normalize_action=true` (velocities aren't in [-1,1])
+- 38 train + 7 val trajectories (same data scale as exp02, no fps filter)
+
+### Training
+- 14,000 steps over ~3 hr at 0.9 step/s
+- train_loss: 0.441 → 0.079 (very low — heavy overfit)
+- **val_loss BEST: 0.3273 @ step 4,210** (3% behind exp02's 0.3164)
+- val drifted upward to ~0.355 by step 14k
+
+### Comparison vs exp02 (same data, smaller model, /cmd action)
+
+| | Model | Frames | Action | Best val_loss | Best-val step |
+|---|---|---|---|---|---|
+| exp02 | S/2 (40M) | 8 | /cmd throttle/steer | **0.3164** | 15,262 |
+| **exp06** | B/2 (159M) | 16 | **odom velocity/yaw** | **0.3273** | **4,210** |
+
+### Interpretation
+
+The architecture + action improvements **do convert faster** (4× fewer steps to reach 0.33), but at this data scale (38 trajs / ~9k train frames) the bigger model can't reach a lower floor than S/2 — it just memorizes faster.
+
+The odom-action change is correct in principle — vel/yaw_rate is the direct input to optical flow. It probably helps; we just can't see the gain at this data scale because both models converge to whatever floor the data supports.
+
+### What this tells us
+- B/2 needs more data to outperform S/2 (the 4× param bump exposes the data-scarcity limit)
+- The action signal change was a free win in terms of convergence speed but the val floor is data-bound
+- Real high-perf requires more data, not more compute
+
+### Artifacts
+- Checkpoint (best-val region): `~/results/nanowm/20260513_164213-NanoWM-B-2-F16S2-tartandrive/checkpoints/across_timesteps/epoch=999-step=10000.ckpt`
+- `experiments/exp06_38trajs_step14k/demo/sample_000{0..6}_compare.gif` — 7 GIFs, one per val trajectory
+- `experiments/exp06_38trajs_step14k/stats.json`
+
+### Bugs fixed during this run (committed)
+- TartanDriveDataSource now skips subdirs without `meta.json` (was crashing on `wm_stats_cache/` created by `normalize_action=true`)
+- Upstream rollout.py uses `_raw_action_mean`/`_raw_action_std` (unbroadcast) for per-source-frame normalization (was crashing on shape mismatch with `frame_interval=2`)
+
+---

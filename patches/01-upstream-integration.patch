@@ -68,7 +68,7 @@ index ea20c4e..01265c4 100644
          )
  
 diff --git a/src/sample/rollout.py b/src/sample/rollout.py
-index 2c91bd6..ac02e9e 100644
+index 2c91bd6..8f4a8f9 100644
 --- a/src/sample/rollout.py
 +++ b/src/sample/rollout.py
 @@ -102,17 +102,41 @@ def main(args):
@@ -135,6 +135,18 @@ index 2c91bd6..ac02e9e 100644
  
              # Load raw actions from trajectory
              traj_data = dataset.data_source.load_trajectory(traj_idx)
+@@ -163,7 +189,10 @@ def main(args):
+ 
+             # Normalize actions if the dataset was configured to do so
+             if dataset.normalize_action:
+-                raw_actions = (raw_actions - dataset.action_mean) / dataset.action_std
++                # raw_actions is per-source-frame [T, action_dim]; dataset.action_mean
++                # is broadcast to [action_dim * frame_interval] for the post-reshape
++                # batch path. Use the un-broadcast _raw_action_mean/_std instead.
++                raw_actions = (raw_actions - dataset._raw_action_mean) / dataset._raw_action_std
+ 
+             batch_visual_list.append(visual_frames)
+             batch_raw_actions_list.append(raw_actions)
 diff --git a/src/sample/sampling_utils.py b/src/sample/sampling_utils.py
 index 0804d87..14b19bb 100644
 --- a/src/sample/sampling_utils.py

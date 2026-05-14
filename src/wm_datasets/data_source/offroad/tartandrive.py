@@ -88,7 +88,12 @@ class TartanDriveDataSource(DataSource):
                     "Did you run scripts/precompute_latents.py?"
                 )
 
-        self._traj_dirs = sorted(p for p in self.data_path.iterdir() if p.is_dir())
+        # Require both meta.json + actions.npy so we skip non-trajectory subdirs
+        # (e.g. WorldModelDataset's wm_stats_cache/) that may sit alongside.
+        self._traj_dirs = sorted(
+            p for p in self.data_path.iterdir()
+            if p.is_dir() and (p / "meta.json").exists() and (p / "actions.npy").exists()
+        )
         if not self._traj_dirs:
             raise FileNotFoundError(
                 f"No trajectory directories under {self.data_path}. "
