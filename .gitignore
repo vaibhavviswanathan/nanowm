@@ -16,7 +16,10 @@ results/
 *.npy
 *.zip
 
-# nano-world-model upstream checkout (pinned via UPSTREAM_PIN, re-clone via scripts)
+# nano-world-model upstream checkout (pinned via UPSTREAM_PIN, re-clone via scripts).
+# Match both a directory checkout and a symlink to a shared checkout
+# (the latter is the common shape inside a `git worktree`).
+nano-world-model
 nano-world-model/
 
 # Demo artifacts: keep GIFs, ignore working files

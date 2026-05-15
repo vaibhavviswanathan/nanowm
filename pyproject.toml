@@ -1,33 +1,48 @@
 [project]
-name = "nanowm-tartandrive"
+name = "nanowm-manipulation"
 version = "0.1.0"
-description = "TartanDrive x nano-world-model POC"
-requires-python = ">=3.10,<3.12"
+description = "SO-101 manipulation x nano-world-model POC (worktree of nanowm-tartandrive)"
+# Manipulation worktree: bumped from main's >=3.10,<3.12 because the SO-101
+# DataSource depends on `lerobot`, which requires Python 3.12+ and a newer
+# diffusers than the main project's pinned 0.24.0. Main repo's TartanDrive
+# work continues to use 3.10 in its own venv.
+requires-python = ">=3.12"
 dependencies = [
     # Core
-    "numpy>=1.24,<2",
+    "numpy>=2.0,<2.3",  # bumped from <2 — lerobot wants 2.x.
     "scipy",
     "pillow",
     "tqdm",
     "requests",
 
-    # Torch (CUDA 12.1 wheels via pytorch index below)
-    "torch>=2.1,<2.4",
-    "torchvision",
+    # Torch + torchvision pinned to 2.7 for the torchcodec=0.7 ABI match
+    # (torchcodec is lerobot's video decoder; tight ABI dependency on torch).
+    "torch>=2.7,<2.8",
+    "torchvision>=0.22,<0.23",
 
-    # PyTorch ecosystem (mirrors upstream environment.yml)
+    # PyTorch ecosystem
     "timm",
     "einops",
     "lpips",
     "piqa",
-    "pytorch-lightning==1.9.5",
+    # Lightning 2.x is required for Python 3.12 (1.9.5 doesn't ship 3.12 wheels).
+    # Upstream's train_experiment.py uses the 2.x API (`LightningModule`, etc.)
+    # so this should be a clean bump.
+    "pytorch-lightning>=2.2,<3",
     "torchmetrics",
 
     # Diffusion / generative
-    "diffusers[torch]==0.24.0",
+    # Bumped from 0.24.0 to satisfy lerobot. We use only the inference VAE
+    # encode/decode API (vae.encode().latent_dist + vae.decode().sample +
+    # vae.config.scaling_factor), all stable since 0.21 — bumping is safe.
+    "diffusers[torch]>=0.27.2,<0.31",
     "accelerate",
-    "transformers<4.41",  # diffusers 0.24 incompatible with newer tokenizers
-    "huggingface-hub<0.26",  # diffusers 0.24 uses hf_cache_home, removed in 0.26+
+    "transformers",
+    "huggingface-hub",
+    "lerobot",
+    # torchcodec's wheel must match the torch ABI exactly. lerobot pulls 0.10
+    # which was built against torch 2.9-nightly; pin to 0.7 paired with torch 2.7.
+    "torchcodec>=0.7,<0.8",
 
     # Config & logging
     "omegaconf",
@@ -58,10 +73,9 @@ dependencies = [
     "beautifulsoup4",
     "ftfy",
     "protobuf==4.25.3",
-    "boto3",  # TartanDrive bucket listing
+    "boto3",  # TartanDrive bucket listing (kept so the main repo's scripts/ still works in this venv)
     "colorama",  # download_files.py imports it
     "rosbags",  # pure-Python rosbag reader for bag-to-tensor conversion
-    "setuptools<80",  # pytorch-lightning 1.9.5 imports pkg_resources, which setuptools 80+ removed
 ]
 
 [project.optional-dependencies]
@@ -71,13 +85,18 @@ dev = [
     "ruff",
 ]
 
+[tool.uv]
+# Resolve only for linux; the pytorch cu126 wheel index doesn't host
+# darwin/win32 builds at these pins.
+environments = ["sys_platform == 'linux'"]
+
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu121" }]
-torchvision = [{ index = "pytorch-cu121" }]
+torch = [{ index = "pytorch-cu126" }]
+torchvision = [{ index = "pytorch-cu126" }]
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.pytest.ini_options]
