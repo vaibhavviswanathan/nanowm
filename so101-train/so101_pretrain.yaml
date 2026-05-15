@@ -1,0 +1,61 @@
+# configs/experiment/so101_pretrain.yaml
+#
+# TEMPLATE — adapt to nano-wm's actual experiment schema. Diff this against
+# `src/configs/experiment/dino_wm_pusht.yaml` to learn the exact field names.
+#
+# Invoke:
+#   python src/main.py \
+#     experiment=so101_pretrain \
+#     dataset=so101/mix \
+#     model=nanowm_b2
+
+defaults:
+  - /model: nanowm_b2
+  - /dataset: so101/mix
+  - _self_
+
+# ----- Diffusion / model config -----
+model:
+  parameterization: v             # pred-v
+  action_conditioning: additive   # additive into denoising blocks
+  patch_size: 2
+  context_length: 8
+  prediction_horizon: 8
+  num_views: 2
+
+# ----- Noise schedule -----
+schedule:
+  type: cosine
+  ztsnr: true                     # zero terminal SNR
+  num_train_steps: 1000           # diffusion timesteps
+
+# ----- Training -----
+training:
+  total_steps: 70000
+  warmup_steps: 2000
+  batch_size: 32                  # H100/80G; halve for A100/40G
+  gradient_accumulation_steps: 1
+  optimizer:
+    name: adamw
+    lr: 1.0e-4
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+  lr_schedule: cosine
+  ema_decay: 0.9999
+  gradient_clip: 1.0
+  mixed_precision: bf16           # NOT fp16 — ZTSNR is numerically delicate
+  task_conditioning: false        # NO task tokens during pretrain
+
+# ----- Eval / logging -----
+eval:
+  fvd_every: 5000
+  sample_every: 5000
+  n_sample_clips: 16
+  ddim_steps_train_eval: 50       # quality during training; CEM uses 25 at inference
+
+# ----- I/O -----
+logging:
+  wandb_project: so101-wm
+  wandb_name: pretrain_nanowm_b2
+  checkpoint_every: 5000
+  keep_last_n_ema: 3              # keep 3 EMA ckpts; final isn't always best for CEM

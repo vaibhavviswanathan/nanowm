@@ -1,0 +1,35 @@
+# configs/dataset/so101/mix.yaml
+#
+# TEMPLATE — adapt field names to match nano-wm's actual dataset config schema.
+# Start by diffing this against `src/configs/dataset/dino_wm/pusht.yaml` and
+# renaming to whatever keys nano-wm expects.
+#
+# This config wires SO101WorldModelDataset (from dataset_wrapper.py) into the
+# nano-wm training loop.
+
+_target_: dataset_wrapper.SO101WorldModelDataset
+
+source_repo_ids:
+  - lerobot/svla_so100_pickplace
+  - lerobot/svla_so100_stacking
+  - lerobot/svla_so100_sorting
+  - lerobot/svla_so101_pickplace
+
+clip_length: 16            # 8 context + 8 prediction at 15 fps  ≈ 1.07 s
+target_fps: 15
+image_size: 256
+stats_path: ${oc.env:RESULTS_DIR}/combined_stats.json
+augment: true
+camera_dropout_p: 0.15
+action_noise_std: 0.01
+streaming: false           # set true to skip local download
+
+# Metadata exposed to the model (action dim, view count, image res).
+# nano-wm likely already infers these from a probe batch; included here for clarity.
+meta:
+  action_dim: 6
+  num_views: 2
+  image_size: 256
+  fps: 15
+  context_length: 8
+  prediction_horizon: 8

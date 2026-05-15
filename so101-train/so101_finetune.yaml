@@ -1,0 +1,40 @@
+# configs/experiment/so101_finetune.yaml
+#
+# TEMPLATE — finetune on your own SO-101 task data with task-language conditioning.
+#
+# Invoke (after editing `source_repo_ids` in configs/dataset/so101/task.yaml
+# to point at your dataset, and adding your repo_id to ACTION_KEY_MAPS /
+# CAMERA_KEY_MAPS in dataset_wrapper.py):
+#
+#   python src/main.py \
+#     experiment=so101_finetune \
+#     dataset=so101/task \
+#     model=nanowm_b2 \
+#     checkpoint.resume_from=${RESULTS_DIR}/so101_pretrain/ema_step_70000.pt
+
+defaults:
+  - so101_pretrain
+  - _self_
+
+training:
+  total_steps: 12000
+  warmup_steps: 500
+  batch_size: 32
+  optimizer:
+    lr: 3.0e-5                    # 3x lower than pretrain
+  task_conditioning: true         # turn ON for finetune
+
+eval:
+  fvd_every: 1000
+  sample_every: 1000
+
+logging:
+  wandb_name: finetune_nanowm_b2
+  checkpoint_every: 2000
+
+# Resume from pretrain EMA
+checkpoint:
+  resume_from: null               # set on command line
+  load_ema: true
+  reset_optimizer: true           # fresh AdamW state for finetune
+  reset_lr_schedule: true
