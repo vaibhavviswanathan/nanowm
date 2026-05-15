@@ -47,4 +47,32 @@ rm -f "${UPSTREAM_DIR}/src/configs/experiment/tartandrive.yaml"
 ln -snf ../../../../src/configs/experiment/tartandrive.yaml \
     "${UPSTREAM_DIR}/src/configs/experiment/tartandrive.yaml"
 
+# SO-101 manipulation scaffold (mirrors the offroad layout):
+#   - DataSource package
+#   - Hydra dataset config dir
+#   - Two experiment config files (pretrain + finetune)
+#
+# Absolute paths so this also works when `nano-world-model/` is itself a
+# symlink (e.g. inside a `git worktree` checkout that points back to the
+# main repo's upstream clone).
+if [ -d "${REPO_ROOT}/src/wm_datasets/data_source/manipulation" ]; then
+    rm -rf "${UPSTREAM_DIR}/src/wm_datasets/data_source/manipulation"
+    ln -snf "${REPO_ROOT}/src/wm_datasets/data_source/manipulation" \
+        "${UPSTREAM_DIR}/src/wm_datasets/data_source/manipulation"
+fi
+
+if [ -d "${REPO_ROOT}/src/configs/dataset/manipulation" ]; then
+    rm -rf "${UPSTREAM_DIR}/src/configs/dataset/manipulation"
+    ln -snf "${REPO_ROOT}/src/configs/dataset/manipulation" \
+        "${UPSTREAM_DIR}/src/configs/dataset/manipulation"
+fi
+
+for f in so101_pretrain.yaml so101_finetune.yaml; do
+    if [ -f "${REPO_ROOT}/src/configs/experiment/${f}" ]; then
+        rm -f "${UPSTREAM_DIR}/src/configs/experiment/${f}"
+        ln -snf "${REPO_ROOT}/src/configs/experiment/${f}" \
+            "${UPSTREAM_DIR}/src/configs/experiment/${f}"
+    fi
+done
+
 echo "Done. Upstream is at $(git rev-parse HEAD), $(ls "${REPO_ROOT}/patches" | wc -l) patches applied, scaffold symlinked."
