@@ -1,0 +1,35 @@
+# @package dataset
+# Base for SO-101 manipulation datasets. Mirrors offroad/base.yaml so the same
+# loader-kwarg surface flows into create_train_val_datasets.
+
+loader:
+  # Identifying inputs (filled in by per-dataset configs):
+  source_repo_ids: null   # List[str], required for the pretrain mix
+  repo_id: null           # Convenience: single string -> wrapped into [repo_id]
+  episodes: null
+
+  # Subsampling
+  target_fps: 15
+  root: null
+  pad_action_dim: null
+  camera_dropout_p: 0.0
+  stats_path: null
+
+  # Shared loader knobs (same names as offroad/base for code reuse).
+  n_rollout: null
+  split_ratio: 0.9
+  validation_size: 32
+  validation_fixed_subset_path: null
+  validation_fixed_subset_size: null
+  validation_fixed_subset_seed: 42
+
+  normalize_state: false
+  # Combined stats produced by scripts/compute_so101_stats.py make the
+  # 6-DoF joints meaningfully un-normalized — keep normalize_action on.
+  normalize_action: true
+
+  train_slice_mode: "random"
+  val_slice_mode: "exhaustive"
+  stride: 1
+  random_seed: 42
+  resize_mode: "stretch"

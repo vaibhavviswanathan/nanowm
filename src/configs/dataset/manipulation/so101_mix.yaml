@@ -1,0 +1,30 @@
+# @package dataset
+# SO-101 pretrain mix: all four SmolVLA-paired LeRobot datasets.
+#
+# Invoke:
+#   uv run python src/main.py experiment=so101_pretrain dataset=manipulation/so101_mix model=nanowm_b2
+
+defaults:
+  - manipulation/base
+  - _self_
+
+name: "so101"
+# 16 frames at 15 fps -> ~1.07 s clip. PLAN.md context_length=8 + horizon=8 = 16.
+# Source data is 30 fps -> stride-2 to 15 fps inside the DataSource.
+# WorldModelDataset.frame_interval is then 1 (no further sub-sampling).
+frame_interval: 1
+
+loader:
+  source_repo_ids:
+    - lerobot/svla_so100_pickplace
+    - lerobot/svla_so100_stacking
+    - lerobot/svla_so100_sorting
+    - lerobot/svla_so101_pickplace
+  target_fps: 15
+  camera_dropout_p: 0.15
+  # Set on CLI once compute_so101_stats.py has been run:
+  #   dataset.loader.stats_path=$RESULTS_DIR/so101_combined_stats.json
+  stats_path: null
+
+spec:
+  action_dim: 6

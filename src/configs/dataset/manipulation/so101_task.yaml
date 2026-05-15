@@ -1,0 +1,30 @@
+# @package dataset
+# SO-101 finetune dataset: a single self-collected SO-101 task corpus.
+#
+# Before training:
+#   1. Push your dataset to HF (or set DATASET_DIR/root for a local one).
+#   2. Register it via scripts/register_so101_source.py
+#      (writes the (action_keys, camera_keys) entry into a JSON consumed at
+#      runtime — see scripts/register_so101_source.py for details), or just
+#      add a register_source(...) call in your driver.
+#   3. Override `dataset.loader.repo_id` to your repo_id and re-use the
+#      pretrain stats file as a starting point.
+
+defaults:
+  - manipulation/base
+  - _self_
+
+name: "so101_task"
+frame_interval: 1
+
+loader:
+  # source_repo_ids gets built from `[repo_id]` at the factory layer; set
+  # repo_id on the CLI:
+  #   dataset.loader.repo_id=your-user/so101_my_task
+  repo_id: null
+  target_fps: 15
+  camera_dropout_p: 0.15
+  stats_path: null
+
+spec:
+  action_dim: 6

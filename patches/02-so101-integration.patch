@@ -1,0 +1,142 @@
+diff --git a/src/wm_datasets/data_source/factory.py b/src/wm_datasets/data_source/factory.py
+index eeb4f52..11c9d39 100644
+--- a/src/wm_datasets/data_source/factory.py
++++ b/src/wm_datasets/data_source/factory.py
+@@ -5,19 +5,21 @@ Factory helpers for DataSource creation.
+ from typing import Optional
+ 
+ from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
+-from .lerobot import LeRobotDataSource
+ from .game import CSGODataSource
+ from .base import DataSource
+ 
+ 
+ def create_data_source(
+     dataset_name: str,
+-    data_path: str,
++    data_path: Optional[str] = None,
+     n_rollout: Optional[int] = None,
+     **kwargs
+ ) -> DataSource:
+     """
+     Factory function to create the appropriate data source based on dataset name.
++
++    `data_path` is optional: pure-HF DataSources like SO101 use repo_id/
++    source_repo_ids instead and never touch a filesystem path.
+     """
+     if dataset_name in ["point_maze", "wall"]:
+         return DinoWorldModelDataSource(
+@@ -49,9 +51,10 @@ def create_data_source(
+         )
+ 
+     if dataset_name == "rt1":
+-        # RT-1 is consumed as the lerobot HF dataset (fractal20220817_data).
+-        # `data_path` is the HF repo_id; optional `root` kwarg points to a
+-        # local mirror. No per-episode .pth format is supported.
++        # Lazy import: lerobot pulls a newer diffusers than upstream pins.
++        # Only load it when rt1 is actually requested.
++        from .lerobot import LeRobotDataSource  # noqa: PLC0415
++
+         lerobot_params = {'root', 'image_key', 'preload_trajectories', 'episodes'}
+         lerobot_kwargs = {k: v for k, v in kwargs.items() if k in lerobot_params}
+         return LeRobotDataSource(
+@@ -72,7 +75,48 @@ def create_data_source(
+             **csgo_kwargs
+         )
+ 
++    if dataset_name == "tartandrive":
++        # Lazy import: avoids loading offroad code (and its torch/numpy paths)
++        # when other datasets are used.
++        from .offroad.tartandrive import TartanDriveDataSource  # noqa: PLC0415
++
++        tartandrive_kwargs = {
++            k: v for k, v in kwargs.items()
++            if k in ['latents_path', 'use_cached_latents']
++        }
++        return TartanDriveDataSource(
++            data_path=data_path,
++            n_rollout=n_rollout,
++            **tartandrive_kwargs,
++        )
++
++    if dataset_name in ("so101", "so101_task"):
++        # Lazy import: pulls lerobot. Multi-source mix supports either
++        # `source_repo_ids: [list]` (pretrain) or a single `repo_id: str`
++        # convenience field (finetune) which we lift into a one-element list.
++        from .manipulation.so101 import SO101DataSource  # noqa: PLC0415
++
++        so101_param_names = {
++            'source_repo_ids', 'target_fps', 'stats_path', 'root',
++            'episodes', 'pad_action_dim', 'camera_dropout_p',
++        }
++        so101_kwargs = {k: v for k, v in kwargs.items() if k in so101_param_names}
++        source_repo_ids = so101_kwargs.pop('source_repo_ids', None)
++        if source_repo_ids is None:
++            repo_id_single = kwargs.get('repo_id') or data_path
++            if not repo_id_single:
++                raise ValueError(
++                    "so101 dataset requires `source_repo_ids` (list) or `repo_id` (single str)"
++                )
++            source_repo_ids = [repo_id_single]
++        return SO101DataSource(
++            source_repo_ids=source_repo_ids,
++            n_rollout=n_rollout,
++            **so101_kwargs,
++        )
++
+     raise ValueError(
+         f"Unknown dataset: {dataset_name}. "
+-        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo"
++        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo, "
++        f"tartandrive, so101, so101_task"
+     )
+diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
+index 86eebdb..6ebce05 100644
+--- a/src/wm_datasets/world_model_dataset.py
++++ b/src/wm_datasets/world_model_dataset.py
+@@ -547,8 +547,13 @@ class WorldModelDataset(Dataset):
+                 print("[WARNING] Applying video augmentation to validation set, not recommended.")
+             video = self.video_augmentation(video)
+ 
+-        # Resize video if needed
+-        if video.shape[-2:] != self.image_size:
++        # Resize video if needed — but only for actual pixel video (3 ch).
++        # When DataSources return pre-computed VAE latents (4+ channels), the
++        # spatial dims (e.g. 32x32 for a 256x256 image under SD VAE) don't
++        # match self.image_size by design; bilinear-interpolating latent
++        # tensors would corrupt them.
++        is_pixel_video = video.shape[-3] == 3
++        if is_pixel_video and video.shape[-2:] != self.image_size:
+             if self.resize_mode == "stretch":
+                 video = torch.nn.functional.interpolate(
+                     video,
+@@ -592,8 +597,9 @@ class WorldModelDataset(Dataset):
+         if self.normalize_state:
+             states = (states - self.state_mean) / self.state_std
+ 
+-        # Normalize pixels to [-1, 1]
+-        if self.normalize_pixel:
++        # Normalize pixels to [-1, 1]. Skip for cached latents — they're
++        # already in the scaled-latent space the model consumes directly.
++        if self.normalize_pixel and is_pixel_video:
+             # Assume video is in [0, 1] range
+             video = video * 2.0 - 1.0
+ 
+@@ -706,6 +712,9 @@ def create_world_model_dataset(
+         'use_relative_actions', 'action_scale', 'object_name',
+         'file_list', 'use_auxiliary_state',  # file_list is for CSGO DataSource
+         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',  # LeRobotDataSource
++        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
++        'source_repo_ids', 'target_fps', 'stats_path', 'episodes',  # SO101DataSource
++        'camera_dropout_p',
+     }
+     for key, value in kwargs.items():
+         if key in datasource_params and value is not None:
+@@ -999,6 +1008,7 @@ def create_eval_only_dataset(
+         'use_relative_actions', 'action_scale', 'object_name',
+         'file_list', 'use_auxiliary_state',
+         'root', 'image_key', 'preload_trajectories', 'pad_action_dim',
++        'latents_path', 'use_cached_latents',  # TartanDriveDataSource
+     }
+     for key, value in kwargs.items():
+         if key in datasource_params and value is not None:
