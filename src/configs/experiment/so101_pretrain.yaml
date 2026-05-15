@@ -1,0 +1,50 @@
+# SO-101 pretrain on the four SmolVLA-paired LeRobot mixes.
+#
+# Hyperparameters from so101-train/PLAN.md; mapped onto upstream's actual
+# Hydra schema (which differs from the spec's draft). Notes on deviations:
+#
+#   - EMA: not implemented upstream. PLAN.md asks for EMA decay 0.9999;
+#     would need an upstream patch (lightning callback + checkpoint surgery).
+#     For the hackathon we ship without it.
+#
+#   - LR schedule: upstream hardcodes `name="constant"` with warmup
+#     (see train_experiment.configure_optimizers). PLAN.md asks for cosine —
+#     also a small upstream patch. Constant-after-warmup is fine for
+#     diffusion training at this scale.
+#
+# Run:
+#   bash scripts/train_so101.sh                  # pretrain mix (default)
+#   bash scripts/train_so101.sh experiment=so101_finetune ...  # finetune
+
+defaults:
+  - default
+
+training:
+  optimizer:
+    lr: 1.0e-4
+    weight_decay: 0.01
+    lr_warmup_steps: 2000     # PLAN.md: 2k warmup
+  max_steps: 70000            # PLAN.md: 60-80k for pretrain (~18-24 hr on H100)
+  batch_size: 32              # PLAN.md: 32-64 on H100/80G; halve for A100/40G
+  gradient_accumulation: 1
+  gradient_clip_norm: 1.0     # PLAN.md: 1.0 (upstream default 0.1 is too tight)
+  gradient_clip_start_step: 0 # apply from step 0 — diffusion targets need it
+  log_every: 100
+  val_every_n_steps: 5000     # PLAN.md: fvd_every / sample_every = 5k
+
+evaluation:
+  validation_size: 32
+  save_videos: true
+  metrics:
+    # FVD/LPIPS/FID enabled — these are the primary quality signal for the
+    # WM (PLAN.md "Validation FVD every 5k steps"). The i3d model needs to
+    # exist at PRETRAINED_MODELS_DIR/i3d/i3d_torchscript.pt.
+    evaluate: true
+    log_every_n_train_steps: 5000
+    buffer_size: 32
+
+infra:
+  num_workers: 16             # video-decode-bound on a multi-source mix
+  mixed_precision: true       # bf16-mixed (PLAN: NOT fp16 — ZTSNR is delicate)
+  vae_precision: fp32
+  compile: true               # H100 benefits significantly

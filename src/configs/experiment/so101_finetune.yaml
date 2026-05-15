@@ -1,0 +1,30 @@
+# SO-101 finetune on a self-collected task corpus, starting from a pretrain
+# checkpoint produced by so101_pretrain.yaml.
+#
+# Invoke (after setting `dataset.loader.repo_id` to your task dataset and
+# pointing `experiment.resume_from_checkpoint` at your pretrain ckpt):
+#
+#   bash scripts/train_so101.sh \
+#       experiment=so101_finetune \
+#       dataset=manipulation/so101_task \
+#       dataset.loader.repo_id=<your-user>/so101_my_task \
+#       experiment.resume_from_checkpoint=$RESULTS_DIR/<pretrain_run>/checkpoints/latest/<latest>.ckpt
+
+defaults:
+  - so101_pretrain
+
+training:
+  optimizer:
+    lr: 3.0e-5                # PLAN.md: 3x lower than pretrain
+    lr_warmup_steps: 500
+  max_steps: 12000            # PLAN.md: 10-15k for finetune (~3-5 hr H100)
+  val_every_n_steps: 1000     # check more often, val data is much smaller
+  log_every: 50
+
+evaluation:
+  validation_size: 16
+  metrics:
+    log_every_n_train_steps: 1000
+    buffer_size: 16
+
+# Inherit infra/diffusion from so101_pretrain.
