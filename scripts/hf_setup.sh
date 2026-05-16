@@ -37,14 +37,9 @@ if echo "${WHOAMI}" | grep -qiE "not logged in|error"; then
 fi
 echo "[hf] whoami: ${WHOAMI}"
 
-# --- 2. Repo exists / create ------------------------------------------------
-echo "[hf] checking repo ${HF_MODEL_REPO}..."
-if uv run hf repo info "${HF_MODEL_REPO}" --repo-type model >/dev/null 2>&1; then
-    echo "[hf] repo exists"
-else
-    echo "[hf] repo missing — creating as private..."
-    uv run hf repo create "${HF_MODEL_REPO}" --repo-type model --private -y
-fi
+# --- 2. Repo exists / create (idempotent via --exist-ok) -------------------
+echo "[hf] ensuring repo ${HF_MODEL_REPO} exists..."
+uv run hf repos create "${HF_MODEL_REPO}" --type model --private --exist-ok >/dev/null
 
 # --- 3. Write-access smoke test --------------------------------------------
 TEST_DIR=$(mktemp -d)
@@ -54,11 +49,11 @@ echo "smoke $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${TEST_FILE}"
 
 echo "[hf] uploading test file..."
 uv run hf upload "${HF_MODEL_REPO}" "${TEST_FILE}" .hf_write_test \
-    --repo-type model --commit-message "auth smoke test" >/dev/null
+    --type model --commit-message "auth smoke test" >/dev/null
 
 echo "[hf] deleting test file..."
-uv run hf repo-files "${HF_MODEL_REPO}" delete .hf_write_test \
-    --repo-type model -y >/dev/null 2>&1 || \
+uv run hf repos delete-files "${HF_MODEL_REPO}" .hf_write_test \
+    --type model >/dev/null 2>&1 || \
     echo "[hf] (couldn't auto-delete test file; ignore — write access still verified)"
 
 echo "[hf] OK. ${HF_MODEL_REPO} ready for checkpoint syncs."

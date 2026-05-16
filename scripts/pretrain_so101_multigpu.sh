@@ -13,10 +13,11 @@
 # Bump BATCH_SIZE_PER_GPU to 8 for effective_bs=64 on 80GB cards if you want
 # a beefier batch (linear-scaling rule: lr ~1.5-2x in that case).
 #
-# ETA at 8 GPUs (70k steps, eff_bs=32):
-#   8x H100 80GB:    ~3-5 hr     (~$50-100 on PI)
-#   8x A100 80GB:    ~4-7 hr     (~$50-85)
-#   8x A100 40GB:    ~4-7 hr     (~$30-55, cost minimum)
+# ETA at 8 GPUs (30k steps default, eff_bs=32):
+#   8x H100 80GB:    ~1.5-2 hr   (~$25-40 on PI)
+#   8x A100 80GB:    ~2-3 hr     (~$25-40)
+#   8x A100 40GB:    ~2-3 hr     (~$15-25, cost minimum)
+# Multiply by ~2.3x if you override to STEPS=70000.
 #
 # Usage:
 #   nohup bash scripts/pretrain_so101_multigpu.sh > pretrain.out 2>&1 &
@@ -61,7 +62,14 @@ export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 export NCCL_P2P_LEVEL="${NCCL_P2P_LEVEL:-NVL}"
 
 # --- Override surface ---------------------------------------------------
-STEPS="${STEPS:-70000}"
+# STEPS default of 30000 is calibrated against the TartanDrive precedent:
+# exp02 (S/2, 9k frames) peaked at step 15k; exp06 (B/2, 9k frames) peaked
+# at step 4k (bigger model overfits faster). SO-101 has ~90k frames so the
+# linear extrapolation puts peak val_loss around 20-40k. PLAN.md's 70k was
+# uncalibrated — past 30-40k you're more likely to be raising val_loss than
+# improving it. Resume from checkpoint via experiment.resume_from_checkpoint
+# if val_loss is still falling at 30k.
+STEPS="${STEPS:-30000}"
 BATCH_SIZE_PER_GPU="${BATCH_SIZE_PER_GPU:-4}"
 GRAD_ACCUM="${GRAD_ACCUM:-1}"
 NUM_FRAMES="${NUM_FRAMES:-16}"

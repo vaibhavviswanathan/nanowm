@@ -48,7 +48,7 @@ echo "[sync] watching ${RUN_DIR}"
 if [ -f "${RUN_DIR}/config.yaml" ]; then
     echo "[sync] uploading config.yaml"
     uv run hf upload "${HF_MODEL_REPO}" "${RUN_DIR}/config.yaml" "config.yaml" \
-        --repo-type model --commit-message "config snapshot" || \
+        --type model --commit-message "config snapshot" || \
         echo "[sync] config.yaml upload failed (will retry next pass)"
 fi
 
@@ -71,7 +71,7 @@ upload_if_changed() {
     local size_mb=$(du -m "${localfile}" 2>/dev/null | cut -f1)
     echo "[sync] uploading ${remote_path} (${size_mb} MB, mtime=${mtime})"
     if uv run hf upload "${HF_MODEL_REPO}" "${localfile}" "${remote_path}" \
-        --repo-type model --commit-message "ckpt sync $(basename "${localfile}")" 2>&1 | tail -3; then
+        --type model --commit-message "ckpt sync $(basename "${localfile}")" 2>&1 | tail -3; then
         UPLOADED[$localfile]="${mtime}"
     else
         echo "[sync] upload failed; will retry next pass"
