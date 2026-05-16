@@ -1,8 +1,6 @@
-diff --git a/src/wm_datasets/data_source/factory.py b/src/wm_datasets/data_source/factory.py
-index eeb4f52..11c9d39 100644
---- a/src/wm_datasets/data_source/factory.py
-+++ b/src/wm_datasets/data_source/factory.py
-@@ -5,19 +5,21 @@ Factory helpers for DataSource creation.
+--- a/src/wm_datasets/data_source/factory.py	2026-05-16 15:13:11.432966596 -0400
++++ b/src/wm_datasets/data_source/factory.py	2026-05-14 16:28:18.771732432 -0400
+@@ -5,19 +5,21 @@
  from typing import Optional
  
  from .dino_wm import DinoWorldModelDataSource, PushTDataSource, DeformableEnvDataSource
@@ -26,7 +24,7 @@ index eeb4f52..11c9d39 100644
      """
      if dataset_name in ["point_maze", "wall"]:
          return DinoWorldModelDataSource(
-@@ -49,9 +51,10 @@ def create_data_source(
+@@ -49,9 +51,10 @@
          )
  
      if dataset_name == "rt1":
@@ -40,7 +38,7 @@ index eeb4f52..11c9d39 100644
          lerobot_params = {'root', 'image_key', 'preload_trajectories', 'episodes'}
          lerobot_kwargs = {k: v for k, v in kwargs.items() if k in lerobot_params}
          return LeRobotDataSource(
-@@ -72,7 +75,48 @@ def create_data_source(
+@@ -72,7 +75,48 @@
              **csgo_kwargs
          )
  
@@ -90,39 +88,9 @@ index eeb4f52..11c9d39 100644
 +        f"Supported: point_maze, wall, pusht, rope, granular, rt1, csgo, "
 +        f"tartandrive, so101, so101_task"
      )
-diff --git a/src/wm_datasets/world_model_dataset.py b/src/wm_datasets/world_model_dataset.py
-index 86eebdb..6ebce05 100644
---- a/src/wm_datasets/world_model_dataset.py
-+++ b/src/wm_datasets/world_model_dataset.py
-@@ -547,8 +547,13 @@ class WorldModelDataset(Dataset):
-                 print("[WARNING] Applying video augmentation to validation set, not recommended.")
-             video = self.video_augmentation(video)
- 
--        # Resize video if needed
--        if video.shape[-2:] != self.image_size:
-+        # Resize video if needed — but only for actual pixel video (3 ch).
-+        # When DataSources return pre-computed VAE latents (4+ channels), the
-+        # spatial dims (e.g. 32x32 for a 256x256 image under SD VAE) don't
-+        # match self.image_size by design; bilinear-interpolating latent
-+        # tensors would corrupt them.
-+        is_pixel_video = video.shape[-3] == 3
-+        if is_pixel_video and video.shape[-2:] != self.image_size:
-             if self.resize_mode == "stretch":
-                 video = torch.nn.functional.interpolate(
-                     video,
-@@ -592,8 +597,9 @@ class WorldModelDataset(Dataset):
-         if self.normalize_state:
-             states = (states - self.state_mean) / self.state_std
- 
--        # Normalize pixels to [-1, 1]
--        if self.normalize_pixel:
-+        # Normalize pixels to [-1, 1]. Skip for cached latents — they're
-+        # already in the scaled-latent space the model consumes directly.
-+        if self.normalize_pixel and is_pixel_video:
-             # Assume video is in [0, 1] range
-             video = video * 2.0 - 1.0
- 
-@@ -706,6 +712,9 @@ def create_world_model_dataset(
+--- a/src/wm_datasets/world_model_dataset.py	2026-05-16 15:13:11.433966577 -0400
++++ b/src/wm_datasets/world_model_dataset.py	2026-05-14 16:27:47.691451642 -0400
+@@ -712,6 +712,9 @@
          'use_relative_actions', 'action_scale', 'object_name',
          'file_list', 'use_auxiliary_state',  # file_list is for CSGO DataSource
          'root', 'image_key', 'preload_trajectories', 'pad_action_dim',  # LeRobotDataSource
@@ -132,7 +100,7 @@ index 86eebdb..6ebce05 100644
      }
      for key, value in kwargs.items():
          if key in datasource_params and value is not None:
-@@ -999,6 +1008,7 @@ def create_eval_only_dataset(
+@@ -1005,6 +1008,7 @@
          'use_relative_actions', 'action_scale', 'object_name',
          'file_list', 'use_auxiliary_state',
          'root', 'image_key', 'preload_trajectories', 'pad_action_dim',
