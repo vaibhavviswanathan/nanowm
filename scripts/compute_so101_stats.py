@@ -25,7 +25,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# Make `wm_datasets...` importable even when this script is invoked outside
+# pytest (which sets pythonpath=["nano-world-model"] via pyproject). The
+# manipulation/ DataSource lives at src/wm_datasets/... in the worktree
+# and is symlinked into upstream's tree.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_UPSTREAM_SRC = _REPO_ROOT / "nano-world-model" / "src"
+if _UPSTREAM_SRC.is_dir():
+    sys.path.insert(0, str(_UPSTREAM_SRC))
 
 import torch
 from tqdm import tqdm
