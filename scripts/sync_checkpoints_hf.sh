@@ -92,5 +92,15 @@ while true; do
         upload_if_changed "${f}" "checkpoints/across_timesteps/$(basename "${f}")"
     done
 
+    # 3. TensorBoard event files — HF auto-renders these as loss/grad charts
+    #    on the model page (https://huggingface.co/<repo>). Files are small
+    #    (KB-MB) so re-uploading the whole tb/ dir every poll is cheap.
+    if [ -d "${RUN_DIR}/tb" ]; then
+        for f in $(find "${RUN_DIR}/tb" -name "events.out.tfevents.*" 2>/dev/null); do
+            rel="${f#${RUN_DIR}/}"   # tb/version_0/events.out.tfevents.XXX
+            upload_if_changed "${f}" "${rel}"
+        done
+    fi
+
     sleep "${INTERVAL}"
 done
