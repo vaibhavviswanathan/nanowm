@@ -108,3 +108,51 @@
      }
      for key, value in kwargs.items():
          if key in datasource_params and value is not None:
+--- a/src/experiments/train_experiment.py	2026-05-16 15:40:49.781678856 -0400
++++ b/src/experiments/train_experiment.py	2026-05-11 11:16:36.068253295 -0400
+@@ -83,7 +83,14 @@
+             zero_terminal_snr=args.experiment.diffusion.zero_terminal_snr,
+         )
+         print(f"[Init] Loading VAE from: {args.vae_model_path}", flush=True)
+-        self.vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
++        # Try subfolder='vae' first (works for SD pipeline repos like
++        # runwayml/stable-diffusion-v1-5). Fall back to no subfolder for
++        # standalone VAE repos like stabilityai/sd-vae-ft-mse (the default
++        # in upstream config.yaml), which has config.json at root.
++        try:
++            self.vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
++        except (OSError, ValueError):
++            self.vae = AutoencoderKL.from_pretrained(args.vae_model_path)
+         # Trust whatever VAE was passed in — read its own scaling factor rather
+         # than baking in 0.18215 (SD 1.x) or any other constant. PixArt/SDXL use
+         # 0.13025, Flux uses 0.3611, etc.
+--- a/src/sample/rollout.py	2026-05-16 15:40:49.782678834 -0400
++++ b/src/sample/rollout.py	2026-05-13 21:34:47.128623976 -0400
+@@ -59,7 +59,11 @@
+     model.eval()
+     
+     print("Loading VAE...")
+-    vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae").to(device)
++    try:
++        vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
++    except (OSError, ValueError):
++        vae = AutoencoderKL.from_pretrained(args.vae_model_path)
++    vae = vae.to(device)
+     vae.eval()
+     vae_precision = getattr(args.experiment.infra, "vae_precision", "fp32")
+     
+--- a/src/sample/sample_dfot.py	2026-05-16 15:40:49.783678812 -0400
++++ b/src/sample/sample_dfot.py	2026-05-11 10:57:25.910393021 -0400
+@@ -86,7 +86,11 @@
+     model.eval()
+     
+     print("Loading VAE...")
+-    vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae").to(device)
++    try:
++        vae = AutoencoderKL.from_pretrained(args.vae_model_path, subfolder="vae")
++    except (OSError, ValueError):
++        vae = AutoencoderKL.from_pretrained(args.vae_model_path)
++    vae = vae.to(device)
+     vae.eval()
+     vae_precision = getattr(args.experiment.infra, "vae_precision", "fp32")
+     
