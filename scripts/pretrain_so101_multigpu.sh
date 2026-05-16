@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
-# Full pretrain on an 8x H100 / 8x A100 80GB node. Lightning DDP via
-# upstream's already-wired `devices=torch.cuda.device_count(), strategy=ddp...`
-# path — no extra launcher needed, just run with all 8 GPUs visible.
+# Multi-GPU pretrain (8x H100 / 8x A100 40GB / 8x A100 80GB / 8x L40S etc.)
+#
+# Lightning DDP is already wired in upstream's train_experiment.Trainer
+# (devices=torch.cuda.device_count(), strategy=ddp_find_unused_parameters_false).
+# Just run with all GPUs visible — the script auto-detects count.
 #
 # Effective batch = batch_size_per_gpu × num_gpus.
 # Default: 4 per GPU × 8 = 32 effective (matches PLAN.md single-H100 target,
-# so LR stays at 1e-4 unchanged).
+# so LR stays at 1e-4 unchanged). At bs=4/GPU + B/2 + 16f, peak memory is
+# ~10 GB/GPU — fits 40GB cards comfortably.
 #
-# Bump BATCH_SIZE_PER_GPU to 8 for effective_bs=64 if you want a beefier batch;
-# the linear-scaling rule suggests lr ~1.5-2x in that case (override via Hydra).
+# Bump BATCH_SIZE_PER_GPU to 8 for effective_bs=64 on 80GB cards if you want
+# a beefier batch (linear-scaling rule: lr ~1.5-2x in that case).
 #
-# ETA: ~3-5 hr wall-clock for 70k steps depending on NCCL & data loader.
+# ETA at 8 GPUs (70k steps, eff_bs=32):
+#   8x H100 80GB:    ~3-5 hr     (~$50-100 on PI)
+#   8x A100 80GB:    ~4-7 hr     (~$50-85)
+#   8x A100 40GB:    ~4-7 hr     (~$30-55, cost minimum)
 #
 # Usage:
-#   nohup bash scripts/pretrain_so101_h100_x8.sh > pretrain.out 2>&1 &
+#   nohup bash scripts/pretrain_so101_multigpu.sh > pretrain.out 2>&1 &
 #   tail -f pretrain.out
 
 set -euo pipefail
