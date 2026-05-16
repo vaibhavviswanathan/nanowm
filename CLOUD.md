@@ -39,6 +39,14 @@ tail -f pretrain.out
 For A100/40GB, swap step 4 for `pretrain_so101_a100.sh` — same effective
 batch size (32) but `bs=16 + grad_accum=2` to fit in 40GB.
 
+For an **8× H100 (or 8× A100/80GB) node**, swap step 4 for
+`pretrain_so101_h100_x8.sh`. Lightning DDP is already wired in upstream
+(`devices=torch.cuda.device_count()`); the script auto-detects the GPU
+count and sets `BATCH_SIZE_PER_GPU=4` so effective batch stays at 32
+(matches single-H100 dynamics, no LR adjustment needed). ETA **~3-5 hr**.
+NCCL env vars are pre-set for a single-node InfiniBand-less topology
+(NVLink P2P only) which matches typical PI 8×H100 instances.
+
 ## Sanity checkpoints
 
 After each step, verify before moving on:
