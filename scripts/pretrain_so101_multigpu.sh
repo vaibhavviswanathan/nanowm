@@ -21,6 +21,14 @@
 # Usage:
 #   nohup bash scripts/pretrain_so101_multigpu.sh > pretrain.out 2>&1 &
 #   tail -f pretrain.out
+#
+# Optional: stream checkpoints to HuggingFace Hub during training. Set
+# both env vars BEFORE launching; the script runs a pre-flight auth +
+# write-access check (fails fast in seconds, not hours) and starts a
+# background syncer that uploads new .ckpt files every 5 min.
+#   export HF_TOKEN=hf_...                    # or `hf auth login`
+#   export HF_MODEL_REPO=<user>/so101-wm
+#   nohup bash scripts/pretrain_so101_multigpu.sh > pretrain.out 2>&1 &
 
 set -euo pipefail
 
@@ -65,6 +73,22 @@ EFFECTIVE_BS=$((BATCH_SIZE_PER_GPU * NUM_GPUS * GRAD_ACCUM))
 echo "[ddp] effective batch = ${BATCH_SIZE_PER_GPU} × ${NUM_GPUS} GPU × ${GRAD_ACCUM} accum = ${EFFECTIVE_BS}"
 
 export WANDB_MODE="${WANDB_MODE:-disabled}"
+
+# --- HF checkpoint streaming (optional) --------------------------------
+# Pre-flight check NOW so broken auth fails in seconds, not hours.
+# Syncer is spawned just before the trainer launches and runs alongside.
+HF_SYNCER_PID=""
+if [ -n "${HF_MODEL_REPO:-}" ]; then
+    echo "[multigpu] HF checkpoint streaming requested -> ${HF_MODEL_REPO}"
+    bash "${REPO_ROOT}/scripts/hf_setup.sh"
+
+    nohup bash "${REPO_ROOT}/scripts/sync_checkpoints_hf.sh" \
+        >> "${RESULTS_DIR}/sync.out" 2>&1 &
+    HF_SYNCER_PID=$!
+    echo "[multigpu] checkpoint syncer started (pid=${HF_SYNCER_PID}, log=${RESULTS_DIR}/sync.out)"
+    # Ensure syncer dies with the script
+    trap "echo '[multigpu] stopping syncer ${HF_SYNCER_PID}'; kill ${HF_SYNCER_PID} 2>/dev/null || true" EXIT
+fi
 
 cd "${UPSTREAM_DIR}"
 

@@ -39,6 +39,25 @@ tail -f pretrain.out
 For A100/40GB, swap step 4 for `pretrain_so101_a100.sh` — same effective
 batch size (32) but `bs=16 + grad_accum=2` to fit in 40GB.
 
+### Streaming checkpoints to HuggingFace (recommended)
+
+Set two env vars before launching pretrain and the script will (1) run a
+pre-flight auth check that fails in seconds if HF access is broken (so
+you don't discover it 5 hr in), and (2) start a background syncer that
+uploads `latest/latest-*.ckpt` and `across_timesteps/*.ckpt` to HF every
+5 min. Lets you pull a partially-trained checkpoint mid-run.
+
+```bash
+export HF_TOKEN=hf_...                          # or `uv run hf auth login`
+export HF_MODEL_REPO=vaibhavviswanathan/so101-wm  # auto-created if missing
+# then the same `pretrain_so101_*.sh` invocation as below
+```
+
+`scripts/hf_setup.sh` runs the auth check standalone if you want to
+verify before kicking off pretrain. The syncer logs to `$RESULTS_DIR/sync.out`.
+
+### Multi-GPU node
+
 For a **multi-GPU node** (8× H100, 8× A100 80GB, or 8× A100 40GB), swap
 step 4 for `pretrain_so101_multigpu.sh`. Lightning DDP is already wired
 in upstream (`devices=torch.cuda.device_count()`); the script auto-detects
