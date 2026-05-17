@@ -1,30 +1,39 @@
-# SO-101 finetune on a self-collected task corpus, starting from a pretrain
-# checkpoint produced by so101_pretrain.yaml.
+# SO-101 finetune on a self-collected task corpus, starting from the
+# pretrain checkpoint produced by so101_pretrain.yaml.
 #
-# Invoke (after setting `dataset.loader.repo_id` to your task dataset and
-# pointing `experiment.resume_from_checkpoint` at your pretrain ckpt):
+# Driven by `scripts/finetune_so101_multigpu.sh` which sets the
+# `experiment.resume_from_checkpoint` override at launch (filename contains
+# `=` chars so it MUST be wrapped in Hydra-style single quotes from the
+# shell).
 #
-#   bash scripts/train_so101.sh \
-#       experiment=so101_finetune \
-#       dataset=manipulation/so101_task \
-#       dataset.loader.repo_id=<your-user>/so101_my_task \
-#       experiment.resume_from_checkpoint=$RESULTS_DIR/<pretrain_run>/checkpoints/latest/<latest>.ckpt
+# Hyperparameter rationale:
+#   - lr: 10x lower than pretrain (1e-4 -> 1e-5). The pretrain ckpt already
+#     sits near a good basin; finetune is small-perturbation territory.
+#   - max_steps: 8000. Finetune corpus is ~41k frames @ 15 fps. At eff_bs=32
+#     with 16-frame clips that's ~80 epochs of unique-clip coverage at 8k
+#     steps — already deep into "the model has memorized the data" territory
+#     for a finetune. Calibrated against TartanDrive precedent: B/2 peaks
+#     fast on small data (exp06 peak at 4k on 9k frames).
+#   - val_every_n_steps: 1000. More frequent val so we can early-stop if
+#     val_loss starts climbing (it will, eventually).
+#   - warmup: 200. Don't need a long warmup when starting from a healthy ckpt.
 
 defaults:
   - so101_pretrain
 
 training:
   optimizer:
-    lr: 3.0e-5                # PLAN.md: 3x lower than pretrain
-    lr_warmup_steps: 500
-  max_steps: 12000            # PLAN.md: 10-15k for finetune (~3-5 hr H100)
-  val_every_n_steps: 1000     # check more often, val data is much smaller
+    lr: 1.0e-5
+    lr_warmup_steps: 200
+  max_steps: 8000
+  val_every_n_steps: 1000
   log_every: 50
 
 evaluation:
   validation_size: 16
   metrics:
+    evaluate: false           # FVD/I3D still off — same reason as pretrain
     log_every_n_train_steps: 1000
     buffer_size: 16
 
-# Inherit infra/diffusion from so101_pretrain.
+# Inherit infra (bf16, compile, num_workers) and model from so101_pretrain.

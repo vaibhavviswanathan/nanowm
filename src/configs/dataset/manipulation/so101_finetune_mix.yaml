@@ -1,0 +1,35 @@
+# @package dataset
+# SO-101 finetune mix: 4 self-collected tabletop task datasets (deduped).
+#
+# Invoke:
+#   bash scripts/finetune_so101_multigpu.sh
+#
+# All sources are LeRobot v3.0, 30 fps, so_follower, 6-DoF, cameras
+# {front, side}. Total: 183 episodes / ~82k frames @ 30 fps.
+
+defaults:
+  - manipulation/base
+  - _self_
+
+name: "so101"
+# 16 frames at 15 fps -> ~1.07s clip. Matches pretrain context so the
+# pretrain checkpoint loads cleanly with no shape surgery.
+frame_interval: 1
+
+loader:
+  source_repo_ids:
+    - ofcourseistillloveyou/so101_recording_20260516_105727
+    - ofcourseistillloveyou/so101_recording_strawberry_20260516_161110
+    - ofcourseistillloveyou/so101_recording_marshmellow_40ep
+    - ofcourseistillloveyou/so101_recording_oreo_40ep
+  target_fps: 15
+  # Lower dropout than pretrain: finetune corpus is smaller, we want every
+  # available signal. 0.05 keeps a token regularization against single-view
+  # over-reliance without throwing away half the visual budget.
+  camera_dropout_p: 0.05
+  # Set on CLI once compute_so101_stats.py has been run over FINETUNE_SOURCES:
+  #   dataset.loader.stats_path=$RESULTS_DIR/so101_finetune_stats.json
+  stats_path: null
+
+spec:
+  action_dim: 6

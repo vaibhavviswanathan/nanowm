@@ -68,6 +68,26 @@ ACTION_KEY_MAPS: Dict[str, List[str]] = {
         "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
         "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
     ],
+    # Finetune mix: user's self-collected SO-101 tabletop tasks. All v3.0,
+    # 30 fps, packed `action` Tensor [6] in canonical order so the per-joint
+    # column list isn't actually read (the packed branch in _fetch_action
+    # short-circuits), but kept here for the factory's registration check.
+    "ofcourseistillloveyou/so101_recording_20260516_105727": [
+        "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+        "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
+    ],
+    "ofcourseistillloveyou/so101_recording_strawberry_20260516_161110": [
+        "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+        "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
+    ],
+    "ofcourseistillloveyou/so101_recording_marshmellow_40ep": [
+        "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+        "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
+    ],
+    "ofcourseistillloveyou/so101_recording_oreo_40ep": [
+        "shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+        "wrist_flex.pos", "wrist_roll.pos", "gripper.pos",
+    ],
 }
 
 # Camera key names vary per source. PLAN.md called these "wrist"/"top" but the
@@ -94,6 +114,26 @@ CAMERA_KEY_MAPS: Dict[str, Dict[str, str]] = {
         "wrist": "observation.images.up",
         "top":   "observation.images.side",
     },
+    # Finetune mix cameras: `front` (3rd-person tabletop) and `side` (oblique).
+    # No wrist-mounted view in this corpus — `front` slots into the "wrist"
+    # canonical lane so it ends up on the left in the horizontal concat,
+    # matching the visual placement used during pretrain.
+    "ofcourseistillloveyou/so101_recording_20260516_105727": {
+        "wrist": "observation.images.front",
+        "top":   "observation.images.side",
+    },
+    "ofcourseistillloveyou/so101_recording_strawberry_20260516_161110": {
+        "wrist": "observation.images.front",
+        "top":   "observation.images.side",
+    },
+    "ofcourseistillloveyou/so101_recording_marshmellow_40ep": {
+        "wrist": "observation.images.front",
+        "top":   "observation.images.side",
+    },
+    "ofcourseistillloveyou/so101_recording_oreo_40ep": {
+        "wrist": "observation.images.front",
+        "top":   "observation.images.side",
+    },
 }
 
 
@@ -102,6 +142,19 @@ PRETRAIN_SOURCES: Tuple[str, ...] = (
     "lerobot/svla_so100_stacking",
     "lerobot/svla_so100_sorting",
     "lerobot/svla_so101_pickplace",
+)
+
+
+# Finetune mix: user-collected SO-101 tabletop tasks. Dedup notes:
+#   - `..._strawberry_num40_...` is byte-identical to `..._strawberry_20260516_161110`
+#   - `..._marshmellow_20ep` is a proper subset of `..._marshmellow_40ep`
+# Both excluded from the mix. Combined size: 183 eps / ~82k frames @ 30 fps
+# (~41k post-subsample to 15 fps).
+FINETUNE_SOURCES: Tuple[str, ...] = (
+    "ofcourseistillloveyou/so101_recording_20260516_105727",
+    "ofcourseistillloveyou/so101_recording_strawberry_20260516_161110",
+    "ofcourseistillloveyou/so101_recording_marshmellow_40ep",
+    "ofcourseistillloveyou/so101_recording_oreo_40ep",
 )
 
 
