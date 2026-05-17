@@ -10,6 +10,13 @@
 #   2. Pretrain checkpoint either present locally OR on HF (downloads).
 #   3. Set HF_TOKEN + HF_MODEL_REPO_FT for finetune ckpt streaming.
 #
+# What this script does (single command, no manual prep needed):
+#   1. Pre-fetches the 4 finetune source datasets from HF Hub.
+#   2. Computes combined action mean/std stats if not already on disk.
+#   3. Downloads the pretrain checkpoint from HF Hub if not local.
+#   4. Launches DDP finetune across all visible GPUs, streaming new ckpts
+#      to HF_MODEL_REPO_FT every 5 minutes.
+#
 # Required env:
 #   RESULTS_DIR=$HOME/results/nanowm
 #   HF_TOKEN=hf_...                          (read+write scope)
@@ -36,18 +43,37 @@ UPSTREAM_DIR="${REPO_ROOT}/nano-world-model"
 : "${HF_MODEL_REPO:?HF_MODEL_REPO not set (e.g. vaiviswanathan/so101-wm — source of pretrain ckpt)}"
 mkdir -p "${RESULTS_DIR}"
 
+# Canonical finetune source list — keep in sync with FINETUNE_SOURCES in
+# src/wm_datasets/data_source/manipulation/so101.py.
+FINETUNE_SOURCES=(
+    "ofcourseistillloveyou/so101_recording_20260516_105727"
+    "ofcourseistillloveyou/so101_recording_strawberry_20260516_161110"
+    "ofcourseistillloveyou/so101_recording_marshmellow_40ep"
+    "ofcourseistillloveyou/so101_recording_oreo_40ep"
+)
+
+# --- Step A: pre-download finetune datasets ----------------------------
+# v3.0 LeRobot datasets aren't always pulled on-demand by the
+# LeRobotDataset constructor — pre-fetching with `hf download` guarantees
+# the parquets are in the HF cache before LeRobotDataset opens them.
+echo "[finetune] pre-fetching ${#FINETUNE_SOURCES[@]} finetune datasets..."
+for repo in "${FINETUNE_SOURCES[@]}"; do
+    echo "  -> ${repo}"
+    uv run --project "${REPO_ROOT}" hf download --repo-type dataset "${repo}" >/dev/null
+done
+echo "[finetune] datasets cached."
+
+# --- Step B: compute combined finetune stats if missing -----------------
 STATS_PATH="${STATS_PATH:-${RESULTS_DIR}/so101_finetune_stats.json}"
 if [ ! -f "${STATS_PATH}" ]; then
-    echo "ERROR: ${STATS_PATH} not found." >&2
-    echo "Run this first to compute combined finetune stats:" >&2
-    echo "  uv run python scripts/compute_so101_stats.py \\" >&2
-    echo "      --sources \\" >&2
-    echo "        ofcourseistillloveyou/so101_recording_20260516_105727 \\" >&2
-    echo "        ofcourseistillloveyou/so101_recording_strawberry_20260516_161110 \\" >&2
-    echo "        ofcourseistillloveyou/so101_recording_marshmellow_40ep \\" >&2
-    echo "        ofcourseistillloveyou/so101_recording_oreo_40ep \\" >&2
-    echo "      --output ${STATS_PATH} --stride 5" >&2
-    exit 1
+    echo "[finetune] computing combined action stats over the finetune mix..."
+    uv run --project "${REPO_ROOT}" python "${REPO_ROOT}/scripts/compute_so101_stats.py" \
+        --sources "${FINETUNE_SOURCES[@]}" \
+        --output "${STATS_PATH}" \
+        --stride 5
+    echo "[finetune] wrote ${STATS_PATH}"
+else
+    echo "[finetune] reusing existing stats: ${STATS_PATH}"
 fi
 
 # --- Pretrain checkpoint -------------------------------------------------
