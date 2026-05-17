@@ -36,10 +36,14 @@ evaluation:
   validation_size: 32
   save_videos: true
   metrics:
-    # FVD/LPIPS/FID enabled — these are the primary quality signal for the
-    # WM (PLAN.md "Validation FVD every 5k steps"). The i3d model needs to
-    # exist at PRETRAINED_MODELS_DIR/i3d/i3d_torchscript.pt.
-    evaluate: true
+    # FVD/LPIPS/FID disabled by default — the callback needs an I3D torchscript
+    # at PRETRAINED_MODELS_DIR/i3d/i3d_torchscript.pt which isn't on a fresh
+    # PI/Lambda box. Enable via Hydra override + supply the file:
+    #   wget -O <path>/i3d_torchscript.pt <upstream-mirror>
+    #   bash scripts/pretrain_so101_multigpu.sh experiment.evaluation.metrics.evaluate=true
+    # Without FVD, the quality signal is train_loss + val_loss + eyeball rollouts
+    # — fine for the POC; FVD is a "nice to have".
+    evaluate: false
     log_every_n_train_steps: 5000
     buffer_size: 32
 
